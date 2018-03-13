@@ -1,6 +1,29 @@
-/*
- * Copyright (c) 2015-2016 Qualcomm Technologies, Inc.  All Rights Reserved.
- */
+/*****************************************************************************
+ *
+ * Copyright 2015-2017 Qualcomm Technologies, Inc.  All rights reserved.
+ *
+ * This software may be subject to U.S. and international export, re-export
+ * or transfer laws. Diversion contrary to U.S. and international law is
+ * strictly prohibited.
+ *
+ * The party receiving this software directly from QTI (the "Recipient")
+ * may use this software solely as set forth in the agreement between the
+ * Recipient and QTI (the "Agreement"). The software may be used in source
+ * code form solely by the Recipient's employees (if any) authorized by the
+ * Agreement. Unless expressly authorized in the Agreement, the Recipient
+ * may not sublicense, assign, transfer or otherwise provide the source
+ * code to any third party. Qualcomm Technologies, Inc. retains all
+ * ownership rights in and to the software. Except as may be expressly
+ * granted by the Agreement, this file provides no license to any patents,
+ * trademarks, copyrights, or other intellectual property of QUALCOMM
+ * Incorporated or its affiliates.
+ *
+ * This notice supersedes any other QTI notices contained within the
+ * software except copyright notices indicating different years of
+ * publication for different portions of the software. This notice does not
+ * supersede the application of any third party copyright notice to that
+ * third party's code.
+ ****************************************************************************/
 
 #ifndef SN_INTERFACE_H_
 #define SN_INTERFACE_H_
@@ -13,7 +36,9 @@
 #define __SNAV_EXTERNAL_SYMBOL_ATTRIBUTE
 #endif // __SNAV_EXTERNAL_SYMBOL_ATTRIBUTE
 
-#define VERSION "1.2.16"
+#define VERSION "1.2.53.1"
+
+#define DEPRECATED __attribute__((deprecated))
 
 /** @file */
 
@@ -28,7 +53,9 @@ extern "C"{
  * @detdesc
  * This function caches the current state of all other components that can be
  * queried. This function must be called once per control loop before querying
- * the flight software information.
+ * the flight software information. This function also handles initialization
+ * of API assets and must be called at least once before calling any other
+ * API function.
  *
  * @return
  * - 0 for success
@@ -55,8 +82,10 @@ int sn_update_data() __SNAV_EXTERNAL_SYMBOL_ATTRIBUTE;
  * @note1hang For this function to have effect, the following conditions must
  *            be met:
  *            - Propellers must not be spinning -- Verify using the
- *              sn_get_props_state() function
- *            - Vehicle must be in a flight mode
+ *              sn_get_props_state() function.
+ *            - Vehicle must be in a flight mode, that is, a heartbeat
+ *              must already be established by calling sn_send_rc_command() or
+ *              a similar function.
  * @par
  * Check SnPropsState using the sn_get_props_state() function to verify that the
  * command executed.
@@ -66,8 +95,8 @@ int sn_update_data() __SNAV_EXTERNAL_SYMBOL_ATTRIBUTE;
  * - -1 for failure (flight software non-functional)
  *
  * @dependencies
- * None.
- *
+ * The sn_update_data() function must be called at least once prior to calling
+ * this function.
  */
 int sn_spin_props() __SNAV_EXTERNAL_SYMBOL_ATTRIBUTE;
 
@@ -81,8 +110,10 @@ int sn_spin_props() __SNAV_EXTERNAL_SYMBOL_ATTRIBUTE;
  * @note1hang For this function to have effect, the following conditions must
  *            be met:
  *            - Propellers must be spinning or starting -- Verify using the
- *              sn_get_props_state() function
- *            - Vehicle must be in a flight mode
+ *              sn_get_props_state() function.
+ *            - Vehicle must be in a flight mode, that is, a heartbeat
+ *              must already be established by calling sn_send_rc_command() or
+ *              a similar function.
  * @par
  * Check SnPropsState using the sn_get_props_state() function to verify that the
  * command executed.
@@ -92,8 +123,8 @@ int sn_spin_props() __SNAV_EXTERNAL_SYMBOL_ATTRIBUTE;
  * - -1 for failure (flight software non-functional)
  *
  * @dependencies
- * None.
- *
+ * The sn_update_data() function must be called at least once prior to calling
+ * this function.
  */
 int sn_stop_props() __SNAV_EXTERNAL_SYMBOL_ATTRIBUTE;
 
@@ -103,11 +134,11 @@ int sn_stop_props() __SNAV_EXTERNAL_SYMBOL_ATTRIBUTE;
  * @detdesc
  * Calibration only starts if it is deemed safe and appropriate for vehicle
  * to do so. Refer to <em>Qualcomm Snapdragon Navigator User Guide</em>
- * (80-P4698-1) for instructions.
+ * (80-P4698-18) for instructions.
  * @par
  * During this calibration, ensure vehicle is completely stationary on a level
- * surface. Use the sn_get_mode() function to determine whether the calibration
- * succeeds or fails.
+ * surface. Use the information in the #GeneralStatus struct to determine whether
+ * the calibration succeeds or fails.
  *
  * @par
  * @note1hang Vehicle must be rebooted after calibration to enable flight.
@@ -117,8 +148,8 @@ int sn_stop_props() __SNAV_EXTERNAL_SYMBOL_ATTRIBUTE;
  * - -1 for failure (flight software non-functional)
  *
  * @dependencies
- * None.
- *
+ * The sn_update_data() function must be called at least once prior to calling
+ * this function.
  */
 int sn_start_static_accel_calibration() __SNAV_EXTERNAL_SYMBOL_ATTRIBUTE;
 
@@ -138,8 +169,8 @@ int sn_start_static_accel_calibration() __SNAV_EXTERNAL_SYMBOL_ATTRIBUTE;
  * - -1 for failure (flight software non-functional)
  *
  * @dependencies
- * None.
- *
+ * The sn_update_data() function must be called at least once prior to calling
+ * this function.
  */
 int sn_get_static_accel_calibration_status(SnCalibStatus *status) __SNAV_EXTERNAL_SYMBOL_ATTRIBUTE;
 
@@ -150,21 +181,19 @@ int sn_get_static_accel_calibration_status(SnCalibStatus *status) __SNAV_EXTERNA
  * Calibration only starts if it is deemed safe and appropriate for vehicle
  * to do so.
  * @par
- * Refer to <em>Qualcomm Snapdragon Navigator User Guide</em> (80-P4698-1) for
+ * Refer to <em>Qualcomm Snapdragon Navigator User Guide</em> (80-P4698-18) for
  * instructions.
  * @par
- * Use the sn_get_mode() function to determine whether the calibration succeeds or
- * fails.
- * @par
- * @note1hang The vehicle must be rebooted after calibration to enable flight.
+ * Use the information in the #GeneralStatus struct to determine whether
+ * the calibration succeeds or fails.
  *
  * @return
  * - 0 if attempt was received
  * - -1 for failure (flight software non-functional)
  *
  * @dependencies
- * None.
- *
+ * The sn_update_data() function must be called at least once prior to calling
+ * this function.
  */
 int sn_start_dynamic_accel_calibration() __SNAV_EXTERNAL_SYMBOL_ATTRIBUTE;
 
@@ -184,8 +213,8 @@ int sn_start_dynamic_accel_calibration() __SNAV_EXTERNAL_SYMBOL_ATTRIBUTE;
  * - -1 for failure (flight software non-functional)
  *
  * @dependencies
- * None.
- *
+ * The sn_update_data() function must be called at least once prior to calling
+ * this function.
  */
 int sn_get_dynamic_accel_calibration_status(SnCalibStatus *status) __SNAV_EXTERNAL_SYMBOL_ATTRIBUTE;
 
@@ -195,7 +224,7 @@ int sn_get_dynamic_accel_calibration_status(SnCalibStatus *status) __SNAV_EXTERN
  * @detdesc
  * Calibration only starts if it is deemed safe and appropriate for vehicle
  * to do so. Refer to <em>Qualcomm Snapdragon Navigator User Guide</em>
- * (80-P4698-1) for instructions.
+ * (80-P4698-18) for instructions.
  * @par
  * During this calibration, ensure vehicle is completely stationary on a level
  * surface.
@@ -203,8 +232,8 @@ int sn_get_dynamic_accel_calibration_status(SnCalibStatus *status) __SNAV_EXTERN
  * Increase the vehicle temperature during this test to ensure that a large
  * temperature range observed.
  * @par
- * Use the sn_get_mode() function to determine whether the calibration succeeds
- * or fails.
+ * Use the information in the #GeneralStatus struct to determine whether
+ * the calibration succeeds or fails.
  * @par
  * @note1hang The vehicle must be rebooted after calibration to enable flight.
  * @par
@@ -216,8 +245,8 @@ int sn_get_dynamic_accel_calibration_status(SnCalibStatus *status) __SNAV_EXTERN
  * - -1 for failure (flight software non-functional)
  *
  * @dependencies
- * None.
- *
+ * The sn_update_data() function must be called at least once prior to calling
+ * this function.
  */
 int sn_start_imu_thermal_calibration() __SNAV_EXTERNAL_SYMBOL_ATTRIBUTE;
 
@@ -238,8 +267,8 @@ int sn_start_imu_thermal_calibration() __SNAV_EXTERNAL_SYMBOL_ATTRIBUTE;
  * - -1 for failure (flight software non-functional)
  *
  * @dependencies
- * None.
- *
+ * The sn_update_data() function must be called at least once prior to calling
+ * this function.
  */
 int sn_get_imu_thermal_calibration_status(SnCalibStatus *status) __SNAV_EXTERNAL_SYMBOL_ATTRIBUTE;
 
@@ -249,7 +278,7 @@ int sn_get_imu_thermal_calibration_status(SnCalibStatus *status) __SNAV_EXTERNAL
  * @detdesc
  * Calibration only starts if it is deemed safe and appropriate for the
  * vehicle. Refer to <em>Qualcomm Snapdragon Navigator User Guide</em>
- * (80-P4698-1) for instructions on how to run this calibration.
+ * (80-P4698-18) for instructions on how to run this calibration.
  * @par
  * @note1hang
  * Vehicle must be rebooted after calibration to enable flight.
@@ -259,8 +288,8 @@ int sn_get_imu_thermal_calibration_status(SnCalibStatus *status) __SNAV_EXTERNAL
  * - -1 for failure (flight software non-functional)
  *
  * @dependencies
- * None.
- *
+ * The sn_update_data() function must be called at least once prior to calling
+ * this function.
  */
 int sn_start_optic_flow_camera_yaw_calibration() __SNAV_EXTERNAL_SYMBOL_ATTRIBUTE;
 
@@ -281,8 +310,8 @@ int sn_start_optic_flow_camera_yaw_calibration() __SNAV_EXTERNAL_SYMBOL_ATTRIBUT
  * - -1 for failure (flight software non-functional)
  *
  * @dependencies
- * None.
- * @newpage
+ * The sn_update_data() function must be called at least once prior to calling
+ * this function. @newpage
  */
 int sn_get_optic_flow_camera_yaw_calibration_status(SnCalibStatus *status) __SNAV_EXTERNAL_SYMBOL_ATTRIBUTE;
 
@@ -292,7 +321,7 @@ int sn_get_optic_flow_camera_yaw_calibration_status(SnCalibStatus *status) __SNA
  * @detdesc
  * Calibration only starts if it is deemed safe and appropriate for the
  * vehicle. Refer to <em>Qualcomm Snapdragon Navigator User Guide</em>
- * (80-P4698-1) for instructions on how to run this calibration.
+ * (80-P4698-18) for instructions on how to run this calibration.
  * @par
  * @note1hang
  * The vehicle must be rebooted after calibration to enable flight.
@@ -302,8 +331,8 @@ int sn_get_optic_flow_camera_yaw_calibration_status(SnCalibStatus *status) __SNA
  * - -1 for failure (flight software non-functional)
  *
  * @dependencies
- * None.
- *
+ * The sn_update_data() function must be called at least once prior to calling
+ * this function.
  */
 int sn_start_magnetometer_calibration() __SNAV_EXTERNAL_SYMBOL_ATTRIBUTE;
 
@@ -324,7 +353,8 @@ int sn_start_magnetometer_calibration() __SNAV_EXTERNAL_SYMBOL_ATTRIBUTE;
  * - -1 for failure (flight software non-functional)
  *
  * @dependencies
- * None. @newpage
+ * The sn_update_data() function must be called at least once prior to calling
+ * this function. @newpage
  */
 int sn_get_magnetometer_calibration_status(SnCalibStatus *status) __SNAV_EXTERNAL_SYMBOL_ATTRIBUTE;
 
@@ -350,8 +380,8 @@ int sn_get_magnetometer_calibration_status(SnCalibStatus *status) __SNAV_EXTERNA
  * - -1 for failure (flight software non-functional)
  *
  * @dependencies
- * None.
- * @newpage
+ * The sn_update_data() function must be called at least once prior to calling
+ * this function. @newpage
  */
 int sn_send_esc_rpm(int *rpm_data, unsigned int size, int fb_id) __SNAV_EXTERNAL_SYMBOL_ATTRIBUTE;
 
@@ -380,8 +410,8 @@ int sn_send_esc_rpm(int *rpm_data, unsigned int size, int fb_id) __SNAV_EXTERNAL
  * - -1 for failure (flight software non-functional)
  *
  * @dependencies
- * None.
- * @newpage
+ * The sn_update_data() function must be called at least once prior to calling
+ * this function. @newpage
  */
 int sn_send_esc_pwm(int *pwm_data, unsigned int size, int fb_id) __SNAV_EXTERNAL_SYMBOL_ATTRIBUTE;
 
@@ -405,10 +435,14 @@ int sn_send_esc_pwm(int *pwm_data, unsigned int size, int fb_id) __SNAV_EXTERNAL
  *                    type command in which rotating counter-clockwise is positive.
  *
  * @detdesc
- * This function sends four dimensionless control commands to the flight controller.
+ * This function sends four dimensionless control commands to the flight
+ * controller and establishes a heartbeat for the API application.
  * The interpretation of the four commands depends on the mode, which
- * can be obtained with the sn_get_mode() function. The desired meaning of the
- * four commands is specified with the type parameter.
+ * can be obtained from the current_mode field of the #GeneralStatus struct.
+ * The desired meaning of the
+ * four commands is specified with the type parameter. A heartbeat must be
+ * established by calling this function before the flight controller allows
+ * the API to take control, such as to start spinning the propellers.
  * @par
  * See Section @xref{sec:Understand_RCCI} for the meaning of the four
  * commands in different contexts.
@@ -427,8 +461,8 @@ int sn_send_esc_pwm(int *pwm_data, unsigned int size, int fb_id) __SNAV_EXTERNAL
  * - -2 if any command is NaN
  *
  * @dependencies
- * None.
- * @newpage
+ * The sn_update_data() function must be called at least once prior to calling
+ * this function.
  */
 int sn_send_rc_command(SnRcCommandType type, SnRcCommandOptions options,
     float cmd0, float cmd1, float cmd2, float cmd3) __SNAV_EXTERNAL_SYMBOL_ATTRIBUTE;
@@ -480,11 +514,11 @@ int sn_apply_cmd_mapping(SnRcCommandType type, SnRcCommandOptions options,
 
 
 /**
- * Gets a human readable string associated with a specific enum type and value
+ * Gets a human-readable string associated with a specific enum type and value.
  *
- * @param[in] type string specifying the type of enum value provided. For example,
- *            "SnMode", "SnMotorState", etc.
- * @param[in] value value to be converted to string (based on type provided)
+ * @param[in] type  String specifying the type of enum value provided. For example,
+ *                  "SnMode", "SnMotorState", etc.
+ * @param[in] value Value to be converted to a string (based on the type provided).
  *
  * @return
  * Pointer to the string corresponding to the provided enum.
@@ -503,7 +537,7 @@ const char * sn_get_enum_string(char* type, int value) __SNAV_EXTERNAL_SYMBOL_AT
  * Pointer to the command name.
  *
  * @dependencies
- * None.
+ * None. @newpage
  */
 const char * sn_get_cmd_name(SnRcCommandType type) __SNAV_EXTERNAL_SYMBOL_ATTRIBUTE;
 
@@ -521,7 +555,6 @@ const char * sn_get_cmd_name(SnRcCommandType type) __SNAV_EXTERNAL_SYMBOL_ATTRIB
  *
  * @dependencies
  * None.
- * @newpage
  */
 const char * sn_get_dimensioned_units(SnRcCommandType type, int index) __SNAV_EXTERNAL_SYMBOL_ATTRIBUTE;
 
@@ -570,7 +603,7 @@ float sn_get_min_value(SnRcCommandType type, int index) __SNAV_EXTERNAL_SYMBOL_A
  * Maximum-allowed value in real units.
  *
  * @dependencies
- * None.
+ * None. @newpage
  */
 float sn_get_max_value(SnRcCommandType type, int index) __SNAV_EXTERNAL_SYMBOL_ATTRIBUTE;
 
@@ -603,10 +636,49 @@ float sn_get_max_value(SnRcCommandType type, int index) __SNAV_EXTERNAL_SYMBOL_A
  * - -2 if any input arguments are NaN
  *
  * @dependencies
- * None. @newpage
+ * The sn_update_data() function must be called at least once prior to calling
+ * this function. @newpage
  */
 int sn_send_thrust_att_ang_vel_command(float thrust, float qw, float qx,
     float qy, float qz, float wx, float wy, float wz) __SNAV_EXTERNAL_SYMBOL_ATTRIBUTE;
+
+/**
+ * Sends position, angle, and derivatives for advanced trajectory tracking.
+ *
+ * @param[in] controller Desired position controller.
+ * @param[in] options    Options for trajectory tracking.
+ * @param[in] x          X component of the position vector in the specified frame.
+ * @param[in] y          Y component of the position vector in the specified frame.
+ * @param[in] z          Z component of the position vector in the specified frame.
+ * @param[in] xd         X component of the velocity vector in the specified frame.
+ * @param[in] yd         Y component of the velocity vector in the specified frame.
+ * @param[in] zd         Z component of the velocity vector in the specified frame.
+ * @param[in] xdd        X component of the acceleration vector in the specified frame.
+ * @param[in] ydd        Y component of the acceleration vector in the specified frame.
+ * @param[in] zdd        Z component of the acceleration vector in the specified frame.
+ * @param[in] yaw        Gravity-aligned yaw angle relative to the specified frame.
+ * @param[in] yaw_rate   Rate at which the gravity-aligned yaw angle changes.
+ *
+ * @detdesc
+ * This function allows precise control of the desired trajectories to use
+ * feed-forward acceleration angles.
+ * @note1hang This function is intended for advanced users -- A trajectory
+ * planner must be used to update these options at a minimum of 50 Hz.
+ *
+ * @return
+ * - 0 if command received
+ * - -1 for failure (flight software non-functional)
+ * - -2 if any input arguments are NaN
+ * - -3 if the specified control mode is unavailable
+ *
+ * @dependencies
+ * None. @newpage
+ */
+int sn_send_trajectory_tracking_command(SnPositionController controller, SnTrajectoryOptions options,
+    float x,   float y,   float z,
+    float xd,  float yd,  float zd,
+    float xdd, float ydd, float zdd,
+    float yaw, float yaw_rate) __SNAV_EXTERNAL_SYMBOL_ATTRIBUTE;
 
 /**
  * Sets the battery voltage.
@@ -625,7 +697,8 @@ int sn_send_thrust_att_ang_vel_command(float thrust, float qw, float qx,
  * - -2 if the voltage is less than or equal to zero, or is NaN
  *
  * @dependencies
- * None.
+ * The sn_update_data() function must be called at least once prior to calling
+ * this function.
  */
 int sn_set_battery_voltage(float voltage) __SNAV_EXTERNAL_SYMBOL_ATTRIBUTE;
 
@@ -646,29 +719,34 @@ int sn_set_battery_voltage(float voltage) __SNAV_EXTERNAL_SYMBOL_ATTRIBUTE;
  * @return
  * - 0 if flight data pointer returns successfully
  * - -1 for failure to get the pointer to flight data
+ *
+ * @dependencies
+ * None.
  */
 int sn_get_flight_data_ptr(int size_cached_struct, SnavCachedData **snav_cached_data_struct) __SNAV_EXTERNAL_SYMBOL_ATTRIBUTE;
 
 
 /**
- * Sets the LED colors, overriding SNAV LED colors
+ * Sets the LED colors, overriding the Snapdragon Navigator LED colors.
  *
- * @param[in] led_colors_input_array array of RGB triplets (range for each is 0-255).
- * @param[in] led_colors_size        size of the input color array - must be greater than zero, less than 25, and multiple of 3
- * @param[in] led_colors_timeout_us  timeout in microseconds for SNAV to take over LED control after API color commands stop
+ * @param[in] led_colors_input_array Array of RGB triplets. The range for each value is 0-255.
+ * @param[in] led_colors_size        Size of the input color array -- Value must be greater than zero, less than 25, and a multiple of 3.
+ * @param[in] led_colors_timeout_us  Timeout in microseconds for Snapdragon Navigator to take over LED control after the API color commands stop.
  *
  * @detdesc
- * This function overrides the internal output of the LED colors. Currently only single RGB triplet is used (first three bytes)
- * Timeout variable specifies the time in microseconds when LED output should switch back to SNAV control after API color commands stop updating.
- * Color values are interpreted as binary for now (0 = off, otherwise = on)
+ * This function overrides the internal output of the LED colors. Currently only a single RGB triplet is used (first three bytes).
+ * The timeout variable specifies the time in microseconds when the LED output switches back to Snapdragon Navigator control after the API color commands stop updating.
+ * Color values are interpreted as binary (0 = Off, otherwise = On).
  *
  * @return
- * - 0 if command received
- * - -1 critical failure (flight software non-functional)
- * - -2 bad length of color data array
+ * - 0 command received
+ * - -1 critical failure (flight software is most likely non-functional)
+ * - -2 bad length of the color data array
  * - -3 negative value provided as timeout
+ *
  * @dependencies
- * None.
+ * The sn_update_data() function must be called at least once prior to calling
+ * this function. @newpage
  */
 int sn_set_led_colors(const uint8_t * led_colors_input_array, int led_colors_size, int led_colors_timeout_us) __SNAV_EXTERNAL_SYMBOL_ATTRIBUTE;
 
@@ -708,60 +786,68 @@ int sn_set_led_colors(const uint8_t * led_colors_input_array, int led_colors_siz
  * @sa
  * sn_send_esc_rpm() \n
  * sn_send_esc_pwm()
- *
+ * @newpage
  */
 int sn_get_esc_state_feedback(SnMotorState *state_feedback, unsigned int size,
     unsigned int *used) __SNAV_EXTERNAL_SYMBOL_ATTRIBUTE;
 
 /**
- * @brief Query estimated accelerometer biases.
+ * @deprecated
+ * This function will be removed in a future release.
  *
- * Accelerometer biases are defined as follows:
- *   compensated linear acceleration = raw linear acceleration - biases
+ * Query-estimated accelerometer biases.
  *
- * Biases are represented with respect to the flight controller's body frame.
+ * @param ax_bias Reference to the float to be filled with the X
+ *                accelerometer-estimated bias in G's.
+ * @param ay_bias Reference to the float to be filled with the Y
+ *                accelerometer-estimated bias in G's.
+ * @param az_bias Reference to the float to be filled with the Z
+ *                accelerometer-estimated bias in G's.
  *
- * Note that sn_update_data() must be called to update these values.
- * @param ax_bias
- * Reference to float that will be filled with x accelerometer estimated bias
- * in G's
- * @param ay_bias
- * Reference to float that will be filled with y accelerometer estimated bias
- * in G's
- * @param az_bias
- * Reference to float that will be filled with z accelerometer estimated bias
- * in G's
+ * @detdesc
+ * Biases are represented with respect to the flight controller's body frame. \n
+ * Accelerometer biases are defined as follows: \n
+ * compensated linear acceleration = raw linear acceleration - biases
+ *
  * @return
  * - 0 for success
- * - -1 for failure (likely indicates flight software non-functional)
+ * - -1 for failure (flight software is most likely non-functional)
  *
- * @note sn_update_data() must be called to update these values.
- *
+ * @dependencies
+ * The sn_update_data() function must be called to update these values. @newpage
  */
-int sn_get_est_accel_bias(float *ax_bias,float *ay_bias,float *az_bias) __SNAV_EXTERNAL_SYMBOL_ATTRIBUTE;
+/** @cond */ DEPRECATED /** @endcond */ int sn_get_est_accel_bias(float *ax_bias,float *ay_bias,float *az_bias) __SNAV_EXTERNAL_SYMBOL_ATTRIBUTE;
 
 /**
- * @brief Query estimated gyroscope biases.
- * @param wx_bias
- * Reference to float that will be filled with x gyro estimated bias
- * @param wy_bias
- * Reference to float that will be filled with y gyro estimated bias
- * @param wz_bias
- * Reference to float that will be filled with z gyro estimated bias
+ * @deprecated
+ * This function will be removed in a future release.
+ *
+ * Query-estimated gyroscope biases.
+ *
+ * @param wx_bias Reference to the float to be filled with the X
+ *                gyro-estimated bias.
+ * @param wy_bias Reference to the float to be filled with the Y
+ *                gyro-estimated bias.
+ * @param wz_bias Reference to the float to be filled with the Z
+ *                gyro-estimated bias.
+ *
  * @return
  * - 0 for success
- * - -1 for failure (likely indicates flight software non-functional)
+ * - -1 for failure (most likely indicates flight non-functional software)
  *
- * @note sn_update_data() must be called to update these values.
- *
+ * @dependencies
+ * The sn_update_data() function must be called to update these values.
  */
-int sn_get_est_gyro_bias(float *wx_bias,float *wy_bias,float *wz_bias) __SNAV_EXTERNAL_SYMBOL_ATTRIBUTE;
+/** @cond */ DEPRECATED /** @endcond */ int sn_get_est_gyro_bias(float *wx_bias,float *wy_bias,float *wz_bias) __SNAV_EXTERNAL_SYMBOL_ATTRIBUTE;
 
 /** @ingroup sn_interface
+ * @deprecated
+ * This function will be removed in a future release.
+ *
  * Detects whether GPS is enabled.
  *
  * @param[out] gps_enabled
- * Pointer to GPS enabled/disabled -- 1 if GPS is enabled; 0 otherwise.
+ * Pointer to GPS enable status -- 1 if GPS is enabled; 0 otherwise.
  *
  * @return
  * - 0 for success
@@ -769,9 +855,59 @@ int sn_get_est_gyro_bias(float *wx_bias,float *wy_bias,float *wz_bias) __SNAV_EX
  *
  * @dependencies
  * The sn_update_data() function must be called to refresh the internal cache of
- * flight control data.
+ * flight control data. @newpage
  */
-int sn_is_gps_enabled(int * gps_enabled) __SNAV_EXTERNAL_SYMBOL_ATTRIBUTE;
+/** @cond */ DEPRECATED /** @endcond */ int sn_is_gps_enabled(int * gps_enabled) __SNAV_EXTERNAL_SYMBOL_ATTRIBUTE;
+
+/**
+ * Queries the value of a specified Snapdragon Navigator parameter.
+ *
+ * @datatypes
+ * #SnParamRet
+ *
+ * @param[in] parent_name Null-terminated character array with the name of the parent structure containing the intended parameter.
+ * @param[in] parameter_name Null-terminated character array with the name of the intended parameter.
+ * @param[out] value_buffer Character buffer to be filled with the null-terminated value for the intended parameter if the query is successful, empty string otherwise.
+ * @param[in] buffer_len Size of the input buffer in bytes.
+ *
+ * @detdesc
+ * This function calls into the DSP to find the current value of a specified parameter. Values are returned as strings.
+ *
+ * @return
+ * SnParamRet describing the state of the query operation.
+ * - Success &ndash; SN_PARAM_SUCCESS
+ * - Failure &ndash; Error codes to determine the reason for failed calls
+ *
+ * @dependencies
+ * Snapdragon Navigator must be running. @newpage
+ */
+  SnParamRet sn_query_parameter(const char * parent_name, const char * parameter_name,  char* value_buffer, int buffer_len) __SNAV_EXTERNAL_SYMBOL_ATTRIBUTE;
+
+
+/**
+ * Sets the value of a specified Snapdragon Navigator parameter.
+ *
+ * @datatypes
+ * #SnParamRet
+ *
+ * @param[in] parent_name Null-terminated character array with the name of the parent structure that contains the intended parameter.
+ * @param[in] parameter_name Null-terminated character array with the name of the intended parameter.
+ * @param[in] value Null-terminated character array with a string representing the intended parameter value.
+ *
+ * @detdesc
+ * This function calls into the DSP to set the value of the specified parameter. Because this call is asynchronous with the control loop, the parameter is not set immediately. The parameter change request is checked for validity and put into a queue to be applied at the start of the next control loop.
+ *
+ * @return
+ * SnParamRet describing the state of the queue operation.
+ * - Success &ndash; SN_PARAM_SUCCESS
+ * - Failure &ndash; Error codes to determine the reason for failed calls
+ *
+ * @note1hang Successful calls do not mean the parameter has changed immediately. To ensure the parameter has been set successfully, it must be queried using the sn_query_parameter() function after at least one full control loop. If errors occur, see the debug prints in the Snapdragon Navigator log.
+ *
+ * @dependencies
+ * Snapdragon Navigator must be running. @newpage
+ */
+  SnParamRet sn_queue_parameter_change(const char * parent_name, const char * parameter_name,  const char* value) __SNAV_EXTERNAL_SYMBOL_ATTRIBUTE;
 
 
 /** @} */ /* end_addtogroup sn_interface */
@@ -781,4 +917,3 @@ int sn_is_gps_enabled(int * gps_enabled) __SNAV_EXTERNAL_SYMBOL_ATTRIBUTE;
 #endif
 
 #endif //SN_INTERFACE_H_
-

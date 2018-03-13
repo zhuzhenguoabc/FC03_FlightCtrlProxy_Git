@@ -18,7 +18,8 @@ LIBS	=	-lsnav_arm \
 				-lEGL_adreno \
 				-lGLESv2_adreno \
 				-lgsl \
-				-lmv \
+				-lmv1 \
+				-lQSML \
 				-lOpenCL \
 				-lsc-a3xx \
 				-L./lib \
@@ -30,9 +31,12 @@ LIBS	+=	$(LIB_DIR)/libcamera.so.0 \
 					$(LIB_DIR)/libstdc++.so.6 \
 					$(LIB_DIR)/libz.so.1 \
 					$(LIB_DIR)/libglib-2.0.so.0 \
+					$(LIB_DIR)/libQSML.so.0 \
+					$(LIB_DIR)/libQSML.so.0.15.2 \
+					$(LIB_DIR)/libgomp.so.1 \
 										
 
-TARGET = flightctrl_proxy  uf1_calibration_test ota
+TARGET = flightctrl_proxy  drone_calibration_test ota
 
 all: $(TARGET)
 

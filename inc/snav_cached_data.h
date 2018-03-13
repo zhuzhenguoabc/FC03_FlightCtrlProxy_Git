@@ -1,7 +1,29 @@
-/*
- * Copyright (c) 2015-2016 Qualcomm Technologies, Inc.  All Rights Reserved.
- */
-
+/*****************************************************************************
+ *
+ * Copyright 2015-2017 Qualcomm Technologies, Inc.  All rights reserved.
+ *
+ * This software may be subject to U.S. and international export, re-export
+ * or transfer laws. Diversion contrary to U.S. and international law is
+ * strictly prohibited.
+ *
+ * The party receiving this software directly from QTI (the "Recipient")
+ * may use this software solely as set forth in the agreement between the
+ * Recipient and QTI (the "Agreement"). The software may be used in source
+ * code form solely by the Recipient's employees (if any) authorized by the
+ * Agreement. Unless expressly authorized in the Agreement, the Recipient
+ * may not sublicense, assign, transfer or otherwise provide the source
+ * code to any third party. Qualcomm Technologies, Inc. retains all
+ * ownership rights in and to the software. Except as may be expressly
+ * granted by the Agreement, this file provides no license to any patents,
+ * trademarks, copyrights, or other intellectual property of QUALCOMM
+ * Incorporated or its affiliates.
+ *
+ * This notice supersedes any other QTI notices contained within the
+ * software except copyright notices indicating different years of
+ * publication for different portions of the software. This notice does not
+ * supersede the application of any third party copyright notice to that
+ * third party's code.
+ ****************************************************************************/
 #ifndef SNAV_CACHED_DATA_H_
 #define SNAV_CACHED_DATA_H_
 
@@ -16,6 +38,8 @@
  */
 typedef struct
 {
+  char device_identifier[20];
+  /**< Version of the DSPaL library used. */
   char compile_date[16];
   /**< Null terminated string containing the compilation date. */
   char compile_time[16];
@@ -27,7 +51,7 @@ typedef struct
   char mac_address[18];
   /**< Null terminated string containing wlan0 mac address if it was successfully polled. */
   char dspal_version[40];
-  /**< Version of DSPaL library used. */
+  /**< Version of the DSPaL library used. */
   int32_t esc_hw_version[8];
   /**< Hardware revision of the ESCs. */
   int32_t esc_sw_version[8];
@@ -77,8 +101,8 @@ typedef struct
   /**< Estimated input system voltage.  (Units: V) */
   float current;
   /**< If available, the estimated electrical current being used by the system.  (Units: A) */
-  int32_t is_using_external_voltage;
-  /**< Cast to enum: #SnavBool. 1 -- Voltage is being measured by the external voltage driver.  0 -- Voltage is measured using ESCs. */
+  uint8_t is_using_external_voltage;
+  /**< 1 -- Voltage is being measured by the external voltage driver.  0 -- Voltage is measured using ESCs. */
   int32_t props_state;
   /**< Cast to enum: #SnPropsState. Propeller state. */
   uint8_t on_ground;
@@ -95,7 +119,7 @@ typedef struct
 typedef struct
 {
   int64_t time;
-  /**< Time at which the struct was logged.  (Units: ms) */
+  /**< Time at which the struct was logged. (Units: ms) */
   uint32_t loop_cntr;
   /**< Number of times at which the control loop has run. */
   int32_t imu_0_status;
@@ -123,9 +147,11 @@ typedef struct
   int32_t attitude_estimator_status;
   /**< Cast to enum: #SnDataStatus. Attitude estimator status. */
   int32_t vio_0_status;
-  /**< Cast to enum: #SnDataStatus. VIO status. */
+  /**< Cast to enum: #SnDataStatus. Visual inertial odometry (VIO) status. */
   int32_t voa_status;
-  /**< Cast to enum: #SnDataStatus. VOA status. */
+  /**< Cast to enum: #SnDataStatus. Visual obstacle avoidance (VOA) status. */
+  int32_t api_trajectory_status;
+  /**< Cast to enum: #SnDataStatus. Status of trajectory data. */
 } DataStatus;
 
 /**
@@ -134,11 +160,35 @@ typedef struct
 typedef struct
 {
   int64_t time;
-  /**< Time at which the struct was logged.  (Units: @us) */
+  /**< Time at which the struct was logged. (Units: @us) */
   uint32_t loop_cntr;
   /**< Number of times the control loop has run. */
   float control_loop_freq;
   /**< Main control loop update frequency.  (Units: Hz) */
+  float imu0_freq;
+  /**< IMU0 update frequency.  (Units: Hz) */
+  float imu1_freq;
+  /**< IMU1 update frequency.  (Units: Hz) */
+  float imu2_freq;
+  /**< IMU2 update frequency.  (Units: Hz) */
+  float baro0_freq;
+  /**< Baro0 update frequency.  (Units: Hz) */
+  float mag0_freq;
+  /**< Mag0 update frequency.  (Units: Hz) */
+  float sonar0_freq;
+  /**< Sonar0 update frequency.  (Units: Hz) */
+  float rc0_freq;
+  /**< RC0 update frequency.  (Units: Hz) */
+  float esc_fb_freq;
+  /**< ESC feedback update frequency.  (Units: Hz) */
+  float gnss0_freq;
+  /**< GNSS0 update frequency.  (Units: Hz) */
+  float gnss1_freq;
+  /**< GNSS1 update frequency.  (Units: Hz) */
+  float obstacle_freq;
+  /**< Obstacle update frequency.  (Units: Hz) */
+  float vio0_freq;
+  /**< VIO0 update frequency.  (Units: Hz) */
 } UpdateRates;
 
 /**
@@ -157,7 +207,7 @@ typedef struct
   float yaw;
   /**< Yaw angle using Tait-Bryan ZYX.  (Units: rad) */
   float rotation_matrix[9];
-  /**< Rotation matrix from vehicle body to world in row-major order. */
+  /**< Rotation matrix from the vehicle body to world in row-major order. */
   float magnetic_yaw_offset;
   /**< Yaw angle with respect to magnetic east = yaw + magnetic_yaw_offset. (Units: rad) */
   float magnetic_declination;
@@ -165,12 +215,58 @@ typedef struct
 } AttitudeEstimate;
 
 /**
+ * Estimate of the vehicle orientation.
+ */
+typedef struct
+{
+  int64_t time;
+  /**< Timestamp.  (Units: @us) */
+  uint32_t cntr;
+  /**< Counter incremented upon successful computation of the attitude estimate. */
+  float roll;
+  /**< Roll angle using Tait-Bryan ZYX.  (Units: rad) */
+  float pitch;
+  /**< Pitch angle using Tait-Bryan ZYX.  (Units: rad) */
+  float yaw;
+  /**< Yaw angle using Tait-Bryan ZYX.  (Units: rad) */
+  float rotation_matrix[9];
+  /**< Rotation matrix from the vehicle body to world in row-major order. */
+  float magnetic_yaw_offset;
+  /**< Yaw angle with respect to magnetic east = yaw + magnetic_yaw_offset. (Units: rad) */
+  float magnetic_declination;
+  /**< Yaw angle with respect to true east = yaw + magnetic_yaw_offset + magnetic_declination. (Units: rad) */
+} AttitudeEstimate1;
+
+/**
+ * Estimate of the vehicle orientation.
+ */
+typedef struct
+{
+  int64_t time;
+  /**< Timestamp.  (Units: @us) */
+  uint32_t cntr;
+  /**< Counter incremented upon successful computation of the attitude estimate. */
+  float roll;
+  /**< Roll angle using Tait-Bryan ZYX.  (Units: rad) */
+  float pitch;
+  /**< Pitch angle using Tait-Bryan ZYX.  (Units: rad) */
+  float yaw;
+  /**< Yaw angle using Tait-Bryan ZYX.  (Units: rad) */
+  float rotation_matrix[9];
+  /**< Rotation matrix from the vehicle body to world in row-major order. */
+  float magnetic_yaw_offset;
+  /**< Yaw angle with respect to magnetic east = yaw + magnetic_yaw_offset. (Units: rad) */
+  float magnetic_declination;
+  /**< Yaw angle with respect to true east = yaw + magnetic_yaw_offset + magnetic_declination. (Units: rad) */
+} AttitudeEstimate2;
+
+/**
  * Apps processor CPU status.
  */
 typedef struct
 {
   int64_t time;
-  /**< Time at which the struct was logged.  (Units: @us) */
+  /**< Time at which the data was logged. (Units: @us) */
   uint32_t cntr;
   /**< Number of times data was updated */
   uint64_t time_apps_us;
@@ -181,7 +277,7 @@ typedef struct
   /**< Current Apps processor CPU frequency. If the CPU is not online, Snapdragon Navigator reads NaN.  (Units: GHz) */
   float max_freq[4];
   /**< Maximum Apps processor CPU frequency -- Can be throttled due to temperature. If the CPU is not online, Snapdragon Navigator reads NaN.  (Units: GHz) */
-  float temp[13];
+  float temp[22];
   /**< Temperature measurements from thermal zones. Reads NaN if the thermal zone is disabled.  (Units: @degc) */
 } CpuStats;
 
@@ -303,7 +399,7 @@ typedef struct
   uint32_t iter;
   /**< Loop iteration in which data was logged. */
   int64_t time;
-  /**< Time at which the struct was logged.  (Units: @us) */
+  /**< Time at which the struct was logged. (Units: @us) */
   uint32_t cntr;
   /**< Number of times data was read. */
   float pressure;
@@ -320,7 +416,7 @@ typedef struct
   uint32_t iter;
   /**< Loop iteration in which data was logged. */
   int64_t time;
-  /**< Time at which the struct was logged.  (Units: @us) */
+  /**< Time at which the struct was logged. (Units: @us) */
   uint32_t cntr;
   /**< Number of times the data was read. */
   float range;
@@ -410,7 +506,7 @@ typedef struct
   uint32_t iter;
   /**< Loop iteration in which data was logged. */
   int64_t time;
-  /**< Time at which the struct was logged.  (Units: @us) */
+  /**< Time at which the struct was logged. (Units: @us) */
   uint32_t cntr;
   /**< Number of times the data was read. */
   int32_t protocol;
@@ -429,7 +525,7 @@ typedef struct
   uint32_t iter;
   /**< Loop iteration in which data was logged. */
   int64_t time;
-  /**< Time at which the struct was logged.  (Units: @us) */
+  /**< Time at which the struct was logged. (Units: @us) */
   uint32_t cntr;
   /**< Number of times the data was read. */
   int32_t cmd_type;
@@ -441,12 +537,46 @@ typedef struct
 } ApiRcRaw;
 
 /**
+ * Thrust, attitude, and angular velocity commands sent through the API.
+ */
+typedef struct
+{
+  uint32_t iter;
+  /**< Loop iteration in which data was logged. */
+  float thrust;
+  /**< Thrust. */
+  float qw;
+  /**< Attitude quaternion W value. */
+  float qx;
+  /**< Attitude quaternion X value. */
+  float qy;
+  /**< Attitude quaternion Y value. */
+  float qz;
+  /**< Attitude quaternion Z value. */
+  float ang_vel[3];
+  /**< Angular velocity. */
+} ApiThrustAttAngVel;
+
+/**
+ * Received API spin or stop propellers commands.
+ */
+typedef struct
+{
+  uint32_t iter;
+  /**< Loop iteration in which data was logged. */
+  uint8_t api_spin_props_rcvd;
+  /**< 1 if spin-propellers command received, 0 otherwise. */
+  uint8_t api_stop_props_rcvd;
+  /**< 1 if stop-propellers command received, 0 otherwise. */
+} ApiPropsCmd;
+
+/**
  * RC commands for control.
  */
 typedef struct
 {
   int64_t time;
-  /**< Time at which the struct was logged.  (Units: @us) */
+  /**< Time at which the struct was logged. (Units: @us) */
   uint32_t cntr;
   /**< Number of times the data was read. */
   int32_t source;
@@ -465,13 +595,15 @@ typedef struct
 typedef struct
 {
   int64_t time;
-  /**< Time at which the struct was logged.  (Units: @us) */
+  /**< Time at which the struct was logged. (Units: @us) */
   uint32_t cntr;
   /**< Number of times the data was read. */
   uint32_t frame_num;
   /**< Frame number received, starting at 0. */
   int64_t frame_timestamp;
   /**< Timestamp of frame.  (Units: @us) */
+  int64_t preview_timestamp;
+  /**< Timestamp of preview callback.  (Units: @us) */
   float exposure;
   /**< Normalized exposure setting used to take the frame. */
   float gain;
@@ -488,7 +620,7 @@ typedef struct
   uint32_t iter;
   /**< Loop iteration in which data was logged. */
   int64_t time;
-  /**< Time at which the struct was logged.  (Units: @us) */
+  /**< Time at which the struct was logged. (Units: @us) */
   uint32_t cntr;
   /**< Number of times the data was read. */
   float pixel_flow[2];
@@ -521,8 +653,8 @@ typedef struct
   /**< Time at which the data was received.  (Units: @us) */
   uint32_t cntr;
   /**< Number of complete messages received. */
-  uint8_t identifier;
-  /**< Type of GNSS receiver. */
+  int32_t identifier;
+  /**< Cast to enum: #SnGnssReceiverType. Type of GNSS receiver. */
   uint32_t num_errors;
   /**< Number of CRC errors. */
   uint32_t gps_week;
@@ -538,7 +670,7 @@ typedef struct
   float altitude;
   /**< Altitude at mean sea level (MSL).  (Units: m) */
   float lin_vel[3];
-  /**< Velocity of the north-east-up (NEU) frame.  (Units: m/s) */
+  /**< Velocity of the east-north-up (ENU) frame.  (Units: m/s) */
   uint8_t fix_type;
   /**< Fix type/quality. */
   uint8_t num_satellites;
@@ -547,32 +679,79 @@ typedef struct
   /**< Horizontal accuracy of the position estimate.  (Units: m) */
   float speed_acc;
   /**< Horizontal speed accuracy.  (Units: m/s) */
-  uint8_t agc[2];
-  /**< Value of the automatic gain controller. */
-  uint8_t sv_ids[20];
+  uint8_t sv_ids[32];
   /**< Satellite identification number. */
-  uint8_t sv_cno[20];
+  uint8_t sv_cn0[32];
   /**< Satellite signal strength.  (Units: C/N0) */
 } Gps0Raw;
 
 /**
- * High-level control data.
+ * Raw API data for trajectory control input.
  */
 typedef struct
 {
   int64_t time;
   /**< Timestamp.  (Units: @us) */
   uint32_t cntr;
-  /**< Counter that is incremented with each control loop. */
+  /**< Number of messages received. */
+  int32_t controller;
+  /**< Cast to enum: #SnPositionController. Desired position controller to use. */
+  int32_t options;
+  /**< Cast to enum: #SnTrajectoryOptions. Trajectory options. */
+  float position[3];
+  /**< Desired position for the controller to achieve. (Units: m) */
+  float velocity[3];
+  /**< Desired velocity for the controller to achieve. (Units: m/s) */
+  float acceleration[3];
+  /**< Desired acceleration for controller to use as a feed-forward term. (Units: m/s/s) */
+  float yaw;
+  /**< Desired gravity aligned yaw angle for the controller to achieve. (Units: raw) */
+  float yaw_rate;
+  /**< Desired gravity aligned yaw angle rate for the controller to achieve. (Units: raw) */
+} TrajectoryDataRaw;
+
+/**
+ * Position and velocity control data.
+ */
+typedef struct
+{
+  int64_t time;
+  /**< Time at which the data was logged. (Units: @us) */
+  uint32_t cntr;
+  /**< Number of times the data was logged. */
   float position_estimated[3];
-  /**< Estimated XYZ position. This data is subject to change in future releases.  (Units: m) */
+  /**< Estimated position of the vehicle with respect to the estimation frame. (Units: m) */
+  float velocity_estimated[3];
+  /**< Estimated velocity of the vehicle with respect to the estimation frame. (Units: m/s) */
   float yaw_estimated;
-  /**< Estimated yaw angle. This data is subject to change in future releases.  (Units: rad) */
+  /**< Estimated yaw angle of the vehicle with respect to the estimation frame. (Units: rad) */
+  uint8_t estimate_is_valid;
+  /**< Whether the estimate is valid. */
+  int32_t position_estimate_type;
+  /**< Cast to enum: #SnPosEstType. Names the dominant source of the position estimate. */
+  float R_eg[9];
+  /**< Orientation of the GNSS ENU frame with respect to the estimation frame. */
+  uint8_t gnss_rotation_is_valid;
+  /**< Indicates if the rotation between the estimation frame and the GNSS ENU frame is valid or not. */
+  float t_eg[3];
+  /**< Vector from the origin of the estimation frame to the origin of the GNSS ENU frame represented with respect to the estimation frame. If the estimation frame were drift-free, this vector would be zero over long time scales (could be non-zero over short time scales due to filtering delays). (Units: m) */
+  uint8_t gnss_translation_is_valid;
+  /**< Indicates if the translation between the estimation frame and the GNSS ENU frame is valid or not. */
+  int32_t gnss_type;
+  /**< Cast to enum: #SnGnssReceiverType. Type of GNSS receiver. */
   float position_desired[3];
-  /**< Desired XYZ position. This data is subject to change in future releases.  (Units: m) */
+  /**< Desired position of the vehicle with respect to the estimation frame. (Units: m) */
+  float velocity_desired[3];
+  /**< Desired velocity of the vehicle with respect to the estimation frame. (Units: m/s) */
   float yaw_desired;
-  /**< Desired yaw angle. This data is subject to change in future releases.  (Units: rad) */
-} HighLevelControlData;
+  /**< Desired yaw of the vehicle with respect to the estimation frame. (Units: rad) */
+  float t_el[3];
+  /**< Vector from the origin of the estimation frame to the origin of the launch frame represented with respect to the estimation frame. (Units: m) */
+  float yaw_el;
+  /**< Yaw angle of the launch frame with respect to the estimation frame. (Units: rad) */
+  uint8_t launch_tf_is_valid;
+  /**< Indicates if the transformation between the estimation frame and the launch frame is valid or not. */
+} PosVel;
 
 /**
  * VIO position and velocity control data.
@@ -608,6 +787,8 @@ typedef struct
   /**< Timestamp.  (Units: @us) */
   uint32_t cntr;
   /**< Counter that is incremented with each control loop. */
+  int32_t identifier;
+  /**< Cast to enum: #SnGnssReceiverType. Type of GNSS receiver. */
   float position_estimated[3];
   /**< Estimated XYZ position. +X is east, +Y is north, +Z is vertically up  (Units: m) */
   float velocity_estimated[3];
@@ -681,27 +862,166 @@ typedef struct
 } EscRaw;
 
 /**
- * Additional detailed power and temperature information.
+ * VOA data.
  */
 typedef struct
 {
   int64_t time;
-  /**< Time at which the packet was logged. */
+  /**< Time at which this data was received. (Units: @us) */
   uint32_t cntr;
-  /**< Number of packets logged. */
-  float voltage;
-  /**< Total battery voltage. (Units: V) */
-  float voltage_cells[6];
-  /**< Voltage of the individual battery cells. (Units: V) */
-  float voltage_aux;
-  /**< Voltage at AUX input. (Units: V) */
-  float current;
-  /**< Total battery current. (Units: A) */
-  float current_fc;
-  /**< Current going to the flight controller. (Units: A) */
-  float temperatures[4];
-  /**< Board-specific temperature measurements. (Units: @degc) */
-} PowerStatus;
+  /**< DSP counter of data received. */
+  uint64_t apps_proc_time;
+  /**< Timestamp from the applications processor. (Units: @us) */
+  uint32_t apps_proc_cntr;
+  /**< Counter of data sent from the applications processor. */
+  int num_points;
+  /**< Number of points used for VOA control. */
+} VoaData;
+
+/**
+ * State of VOA processing.
+ */
+typedef struct
+{
+  int64_t time;
+  /**< Timestamp of information (Units: @us) */
+  uint32_t cntr;
+  /**< Monotonically increasing counter */
+  uint8_t voa_enabled;
+  /**< 1 if VOA is enabled, 0 otherwise. */
+  uint8_t voa_running;
+  /**< 1 if VOA is running and has the ability to modify control output, 0 otherwise. */
+  uint8_t voa_active;
+  /**< 1 if VOA is currently modifying control output, 0 otherwise. */
+} VoaStatus;
+
+/**
+ * Raw obstacle distance information (if available).
+ */
+typedef struct
+{
+  int64_t time;
+  /**< Timestamp of data. (Units: @us) */
+  uint32_t cntr;
+  /**< Data log counter. */
+  float relative_distances[4];
+  /**< Array of distances sensed in the body coordinate frame and centered around the forward +X direction. Each number corresponds to an angle specified in the parameter file. By default, each number corresponds to 0.3 radians. (Units: m) */
+} RelativeObstacleDistances;
+
+/**
+ * GPS latitude and longitude at the time of initial GPS lock.
+ */
+typedef struct
+{
+  int64_t time;
+  /**< Timestamp of initial GPS lock. (Units: @us) */
+  int32_t origin_latitude;
+  /**< Latitude at GPS lock. */
+  int32_t origin_longitude;
+  /**< Longitude at GPS lock. */
+} GpsOrigin;
+
+/**
+ * Outputs of mvVISLAM transformed into SNAV's Z-up VIO frame. Field names are based on those in mvVISLAM API. Refer to the mvVISLAM API documentation for more information about these fields.
+ */
+typedef struct
+{
+  uint32_t iter;
+  /**< Loop iteration in which data was logged. */
+  int64_t time;
+  /**< Time according to DSP clock when VIO data was received on DSP. (Units: @us) */
+  int64_t apps_time;
+  /**< Time according to Apps Proc clock when VIO data was retrieved by Apps Proc. (Units: @us) */
+  int64_t pose_time;
+  /**< Timestamp of pose given by mvVISLAM API. (Units: @us) */
+  uint32_t cntr;
+  /**< Update counter for this data structure. */
+  int pose_quality;
+  /**< Quality of the pose estimate. */
+  float body_pose_position[3];
+  /**< Vehicle position w.r.t. SNAV's Z-up VIO frame. (Units: m) */
+  float body_pose_rotation[9];
+  /**< Orientation of vehicle frame w.r.t. SNAV's Z-up VIO frame. */
+  float err_cov_pose_position[9];
+  /**< Error covariance matrix for vehicle position estimate. (Units: m^2) */
+  float time_alignment;
+  /**< Time misalignment between camera and IMU data. (Units: s) */
+  float velocity[3];
+  /**< Vehicle velocity w.r.t. SNAV's Z-up VIO frame. (Units: m/s) */
+  float err_cov_velocity[9];
+  /**< Error covariance matrix for vehicle velocity estimate. (Units: (m/s)^2) */
+  float angular_velocity[3];
+  /**< Vehicle angular velocity w.r.t. SNAV's Z-up VIO frame. (Units: rad/s) */
+  float gravity[3];
+  /**< Gravity vector w.r.t. SNAV's Z-up VIO frame. (Units: m/s/s) */
+  float err_cov_gravity[9];
+  /**< Error covariance matrix for gravity vector estimate. */
+  float w_bias[3];
+  /**< Gyro bias w.r.t. SNAV's Z-up VIO frame. (Units: rad) */
+  float a_bias[3];
+  /**< Accelerometer bias w.r.t. SNAV's Z-up VIO frame. (Units: m/s/s) */
+  float tbc[3];
+  /**< Translation from the camera to the IMU w.r.t. SNAV's Z-up VIO frame. (Units: m) */
+  float Rbc[9];
+  /**< Orientation of camera frame w.r.t. IMU frame. */
+  uint32_t error_code;
+  /**< mvVISLAM error code; see mvVISLAM API documentation. */
+  int32_t num_tracked_pts;
+  /**< Number of map points being observed and estimated. */
+} Vio0Raw;
+
+/**
+ * Raw world offset computation from fiducial markers.
+ */
+typedef struct
+{
+  uint64_t time;
+  /**< Time at which the struct was logged.  (Units: @us) */
+  uint32_t frame_id;
+  /**< Camera frame ID used for marker detection. */
+  int64_t frame_timestamp_ns;
+  /**< Timestamp of the camera frame used for marker detection. (Units: ns) */
+  uint32_t num_markers_used;
+  /**< Number of marker detections in the frame used in offset computation. */
+  float yaw_offset_raw;
+  /**< Raw Yaw offset. (Units: rad) */
+  float pos_offset_raw[3];
+  /**< Raw XYZ offset (Units: m) */
+} FiducialMarkerWorldOffsetRaw;
+
+/**
+ * Filtered world offset computation from fiducial markers.
+ */
+typedef struct
+{
+  uint64_t time;
+  /**< Time at which the struct was logged.  (Units: @us) */
+  uint32_t num_raw_offset_updates;
+  /**< Number of times that the raw offsets were computed. */
+  float pos_offset[3];
+  /**< Vector from origin of marker world frame to origin of Snapdragon Navigator world frame represented in the Snapdragon Navigator world frame. (Units: m) */
+  float yaw_offset;
+  /**< Yaw component of the rotation from the Snapdragon Navigator world frame to the marker world frame. (Units: rad) */
+  float pos_world[3];
+  /**< Estimated position represented in the marker world frame. (Units: m) */
+  float yaw_world;
+  /**< Estimated yaw angle represented in the marker world frame. (Units: rad) */
+} FiducialMarkerWorldOffsetData;
+
+/**
+ * Simulation ground truth.
+ */
+typedef struct
+{
+  int64_t time;
+  /**< Sim current time. (Units: @us) */
+  float position[3];
+  /**< Ground truth position of the vehicle with respect to the simulation frame. (Units: m) */
+  float velocity[3];
+  /**< Ground truth velocity of the vehicle with respect to the simulation frame. (Units: m/s) */
+  float R[9];
+  /**< Ground truth orientation of the vehicle-fixed frame with respect to the simulation frame. */
+} SimGroundTruth;
 
 /**
  * Snapdragon Navigator cached data for the sn_get_flight_data_ptr() function.
@@ -721,6 +1041,10 @@ typedef struct
   UpdateRates update_rates;
   /**< System and sensor update rates. */
   AttitudeEstimate attitude_estimate;
+  /**< Estimate of the vehicle orientation. */
+  AttitudeEstimate1 attitude_estimate1;
+  /**< Estimate of the vehicle orientation. */
+  AttitudeEstimate2 attitude_estimate2;
   /**< Estimate of the vehicle orientation. */
   CpuStats cpu_stats;
   /**< Apps processor CPU status. */
@@ -754,6 +1078,10 @@ typedef struct
   /**< Raw Spektrum RC data. */
   ApiRcRaw api_rc_raw;
   /**< RC commands sent through the API. */
+  ApiThrustAttAngVel api_thrust_att_ang_vel;
+  /**< Thrust, attitude, and angular velocity commands sent through the API. */
+  ApiPropsCmd api_props_cmd;
+  /**< Received API spin or stop propellers commands. */
   RcActive rc_active;
   /**< RC commands for control. */
   Camera0FrameInfo camera_0_frame_info;
@@ -764,8 +1092,10 @@ typedef struct
   /**< Downfacing camera calibration for tilt angle (optic flow camera yaw calibration). */
   Gps0Raw gps_0_raw;
   /**< Raw GPS data. */
-  HighLevelControlData high_level_control_data;
-  /**< High-level control data. */
+  TrajectoryDataRaw trajectory_data_raw;
+  /**< Raw API data for trajectory control input. */
+  PosVel pos_vel;
+  /**< Position and velocity control data. */
   VioPosVel vio_pos_vel;
   /**< VIO position and velocity control data. */
   GpsPosVel gps_pos_vel;
@@ -774,8 +1104,22 @@ typedef struct
   /**< Optic flow position and velocity control data. */
   EscRaw esc_raw;
   /**< Raw ESC data. */
-  PowerStatus power_status;
-  /**< Additional detailed power and temperature information. */
+  VoaData voa_data;
+  /**< VOA data. */
+  VoaStatus voa_status;
+  /**< State of VOA processing. */
+  RelativeObstacleDistances relative_obstacle_distances;
+  /**< Raw obstacle distance information (if available). */
+  GpsOrigin gps_origin;
+  /**< GPS latitude and longitude at the time of initial GPS lock. */
+  Vio0Raw vio_0_raw;
+  /**< Outputs of mvVISLAM transformed into SNAV's Z-up VIO frame. Field names are based on those in mvVISLAM API. Refer to the mvVISLAM API documentation for more information about these fields. */
+  FiducialMarkerWorldOffsetRaw fiducial_marker_world_offset_raw;
+  /**< Raw world offset computation from fiducial markers. */
+  FiducialMarkerWorldOffsetData fiducial_marker_world_offset_data;
+  /**< Filtered world offset computation from fiducial markers. */
+  SimGroundTruth sim_ground_truth;
+  /**< Simulation ground truth. */
 } SnavCachedData;
 
 /** @} */ /* end_addtogroup sn_datatypes */
