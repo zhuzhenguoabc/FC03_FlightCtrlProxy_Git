@@ -101,6 +101,8 @@ typedef struct
   /**< Estimated input system voltage.  (Units: V) */
   float current;
   /**< If available, the estimated electrical current being used by the system.  (Units: A) */
+  float charge_used;
+  /**< Charge used by the vehicle since initialization of the flight controller.  (Units: mAh) */
   uint8_t is_using_external_voltage;
   /**< 1 -- Voltage is being measured by the external voltage driver.  0 -- Voltage is measured using ESCs. */
   int32_t props_state;
@@ -123,7 +125,11 @@ typedef struct
   uint32_t loop_cntr;
   /**< Number of times at which the control loop has run. */
   int32_t imu_0_status;
-  /**< Cast to enum: #SnDataStatus. IMU sensor status. */
+  /**< Cast to enum: #SnDataStatus. IMU0 sensor status. */
+  int32_t imu_1_status;
+  /**< Cast to enum: #SnDataStatus. IMU1 sensor status. */
+  int32_t imu_2_status;
+  /**< Cast to enum: #SnDataStatus. IMU2 sensor status. */
   int32_t baro_0_status;
   /**< Cast to enum: #SnDataStatus. Barometer sensor status. */
   int32_t esc_feedback_status;
@@ -356,6 +362,40 @@ typedef struct
 } Imu0Compensated;
 
 /**
+ * Inertial measurement unit (IMU) data after compensation.
+ */
+typedef struct
+{
+  int64_t time;
+  /**< Time data was received.  (Units: @us) */
+  uint32_t cntr;
+  /**< Number of compensated measurements recorded. */
+  float temp;
+  /**< Temperature of IMU.  (Units: @degc) */
+  float lin_acc[3];
+  /**< Linear acceleration.  (Units: gravity (~9.81 m/s/s)) */
+  float ang_vel[3];
+  /**< Angular velocity.  (Units: rad/s) */
+} Imu1Compensated;
+
+/**
+ * Inertial measurement unit (IMU) data after compensation.
+ */
+typedef struct
+{
+  int64_t time;
+  /**< Time data was received.  (Units: @us) */
+  uint32_t cntr;
+  /**< Number of compensated measurements recorded. */
+  float temp;
+  /**< Temperature of IMU.  (Units: @degc) */
+  float lin_acc[3];
+  /**< Linear acceleration.  (Units: gravity (~9.81 m/s/s)) */
+  float ang_vel[3];
+  /**< Angular velocity.  (Units: rad/s) */
+} Imu2Compensated;
+
+/**
  * Data results from IMU temperature calibration.
  */
 typedef struct
@@ -496,6 +536,8 @@ typedef struct
   /**< Scale parameters of mapping. */
   float offset[3];
   /**< XYZ offset of mapping. */
+  float rot[9];
+  /**< Mag Rotation on vehicle from calibration file. */
 } Mag0Calibration3D;
 
 /**
@@ -679,11 +721,58 @@ typedef struct
   /**< Horizontal accuracy of the position estimate.  (Units: m) */
   float speed_acc;
   /**< Horizontal speed accuracy.  (Units: m/s) */
+  float speed_up_acc;
+  /**< Vertical speed accuracy.  (Units: m/s) */
   uint8_t sv_ids[32];
   /**< Satellite identification number. */
   uint8_t sv_cn0[32];
   /**< Satellite signal strength.  (Units: C/N0) */
 } Gps0Raw;
+
+/**
+ * Raw GPS data.
+ */
+typedef struct
+{
+  uint32_t iter;
+  /**< Loop iteration in which data was logged. */
+  int64_t time;
+  /**< Time at which the data was received.  (Units: @us) */
+  uint32_t cntr;
+  /**< Number of complete messages received. */
+  int32_t identifier;
+  /**< Cast to enum: #SnGnssReceiverType. Type of GNSS receiver. */
+  uint32_t num_errors;
+  /**< Number of CRC errors. */
+  uint32_t gps_week;
+  /**< GPS week number.  (Units: weeks) */
+  uint32_t gps_time_sec;
+  /**< Time of week.  (Units: sec) */
+  uint32_t gps_time_nsec;
+  /**< Time of week.  (Units: ns) */
+  int32_t latitude;
+  /**< Position latitude.  (Units: deg*10e7) */
+  int32_t longitude;
+  /**< Position longitude.  (Units: deg*10e7) */
+  float altitude;
+  /**< Altitude at mean sea level (MSL).  (Units: m) */
+  float lin_vel[3];
+  /**< Velocity of the east-north-up (ENU) frame.  (Units: m/s) */
+  uint8_t fix_type;
+  /**< Fix type/quality. */
+  uint8_t num_satellites;
+  /**< Number of satellites used in the solution. */
+  float horizontal_acc;
+  /**< Horizontal accuracy of the position estimate.  (Units: m) */
+  float speed_acc;
+  /**< Horizontal speed accuracy.  (Units: m/s) */
+  float speed_up_acc;
+  /**< Vertical speed accuracy.  (Units: m/s) */
+  uint8_t sv_ids[32];
+  /**< Satellite identification number. */
+  uint8_t sv_cn0[32];
+  /**< Satellite signal strength.  (Units: C/N0) */
+} Gps1Raw;
 
 /**
  * Raw API data for trajectory control input.
@@ -794,13 +883,13 @@ typedef struct
   float velocity_estimated[3];
   /**< Estimated XYZ velocity.  (Units: m/s) */
   float yaw_estimated;
-  /**< Estimated yaw angle of the vehicle’s body-fixed frame with respect to the East North Up (ENU) frame.  (Units: rad) */
+  /**< Estimated yaw angle of the vehicleâ€™s body-fixed frame with respect to the East North Up (ENU) frame.  (Units: rad) */
   float position_desired[3];
   /**< Desired XYZ position.  (Units: m) */
   float velocity_desired[3];
   /**< Desired XYZ velocity.  (Units: m/s) */
   float yaw_desired;
-  /**< Desired yaw angle of the vehicle’s body-fixed frame with respect to the ENU frame.  (Units: rad) */
+  /**< Desired yaw angle of the vehicleâ€™s body-fixed frame with respect to the ENU frame.  (Units: rad) */
   uint8_t is_enabled;
   /**< If enabled (set to 1), this data is populated when the vehicle gets a GPS lock. */
 } GpsPosVel;
@@ -922,53 +1011,66 @@ typedef struct
 } GpsOrigin;
 
 /**
- * Outputs of mvVISLAM transformed into SNAV's Z-up VIO frame. Field names are based on those in mvVISLAM API. Refer to the mvVISLAM API documentation for more information about these fields.
+ * Output from the mvVISLAM API transformed into the Snapdragon Navigator VIO frame, which is defined by the vehicle frame at VIO initialization. Field names are based on fields in the mvVISLAM API. Refer to the <a href="https://developer.qualcomm.com/software/machine-vision-sdk/tools\>Machine Vision SDK"</a> for more information about these fields.
  */
 typedef struct
 {
   uint32_t iter;
-  /**< Loop iteration in which data was logged. */
+  /**< Loop iteration in which VIO data was logged. */
   int64_t time;
-  /**< Time according to DSP clock when VIO data was received on DSP. (Units: @us) */
+  /**< Time at which the DSP received VIO data (according to the DSP clock). (Units: @us) */
   int64_t apps_time;
-  /**< Time according to Apps Proc clock when VIO data was retrieved by Apps Proc. (Units: @us) */
+  /**< Time at which the Apps Processor retrieved VIO data (according to the Apps Processor clock). (Units: @us) */
   int64_t pose_time;
-  /**< Timestamp of pose given by mvVISLAM API. (Units: @us) */
+  /**< Timestamp of the pose given by the mvVISLAM API. (Units: @us) */
   uint32_t cntr;
   /**< Update counter for this data structure. */
   int pose_quality;
   /**< Quality of the pose estimate. */
   float body_pose_position[3];
-  /**< Vehicle position w.r.t. SNAV's Z-up VIO frame. (Units: m) */
+  /**< Vehicle position with respect to the Snapdragon Navigator VIO frame. (Units: m) */
   float body_pose_rotation[9];
-  /**< Orientation of vehicle frame w.r.t. SNAV's Z-up VIO frame. */
+  /**< Orientation of vehicle frame with respect to the Snapdragon Navigator VIO frame. */
   float err_cov_pose_position[9];
   /**< Error covariance matrix for vehicle position estimate. (Units: m^2) */
   float time_alignment;
   /**< Time misalignment between camera and IMU data. (Units: s) */
   float velocity[3];
-  /**< Vehicle velocity w.r.t. SNAV's Z-up VIO frame. (Units: m/s) */
+  /**< Vehicle velocity with respect to the Snapdragon Navigator VIO frame. (Units: m/s) */
   float err_cov_velocity[9];
-  /**< Error covariance matrix for vehicle velocity estimate. (Units: (m/s)^2) */
+  /**< Error covariance matrix for the vehicle velocity estimate. (Units: (m/s)^2) */
   float angular_velocity[3];
-  /**< Vehicle angular velocity w.r.t. SNAV's Z-up VIO frame. (Units: rad/s) */
+  /**< Vehicle angular velocity with respect to the Snapdragon Navigator VIO frame. (Units: rad/s) */
   float gravity[3];
-  /**< Gravity vector w.r.t. SNAV's Z-up VIO frame. (Units: m/s/s) */
+  /**< Gravity vector with respect to the Snapdragon Navigator VIO frame. (Units: m/s/s) */
   float err_cov_gravity[9];
-  /**< Error covariance matrix for gravity vector estimate. */
+  /**< Error covariance matrix for the gravity vector estimate. */
   float w_bias[3];
-  /**< Gyro bias w.r.t. SNAV's Z-up VIO frame. (Units: rad) */
+  /**< Gyro bias with respect to the Snapdragon Navigator VIO frame. (Units: rad) */
   float a_bias[3];
-  /**< Accelerometer bias w.r.t. SNAV's Z-up VIO frame. (Units: m/s/s) */
+  /**< Accelerometer bias with respect to the Snapdragon Navigator VIO frame. (Units: m/s/s) */
   float tbc[3];
-  /**< Translation from the camera to the IMU w.r.t. SNAV's Z-up VIO frame. (Units: m) */
+  /**< Translation from the camera to the IMU with respect to the Snapdragon Navigator VIO frame. (Units: m) */
   float Rbc[9];
-  /**< Orientation of camera frame w.r.t. IMU frame. */
+  /**< Orientation of camera frame with respect to the IMU frame. */
   uint32_t error_code;
-  /**< mvVISLAM error code; see mvVISLAM API documentation. */
+  /**< Error code of the mvVISLAM API. For information, refer to the Machine Vision SDK. */
   int32_t num_tracked_pts;
   /**< Number of map points being observed and estimated. */
 } Vio0Raw;
+
+
+typedef struct
+{
+  int64_t time;
+  /**< Time at which the struct was logged. (Units: @us) */
+  uint32_t loop_cntr;
+  /**< Number of times the control loop has run */
+  int16_t des_rpm[8];
+  /**< Desired Motor RPMs when ESC is in RPM control mode (Units: rpm) */
+  int16_t des_pwm[8];
+  /**< Desired Motor PWMs when ESC is in PWM control mode (Units: pwm) */
+} DesiredEscState;
 
 /**
  * Raw world offset computation from fiducial markers.
@@ -1024,6 +1126,38 @@ typedef struct
 } SimGroundTruth;
 
 /**
+ * Mag calibration data
+ */
+typedef struct
+{
+  int64_t time;
+  /**< Timestamp.  (Units: @us) */
+  uint32_t cntr;
+  /**< Counter incremented upon data logged */
+  float mag_data_raw[3];
+  /**< x, y, z components of raw mag */
+  float mag_att_est_R[9];
+  /**< Att Est Rotation matrix */
+} MagDataForCalibration;
+
+/**
+ * Mag matrix calibration data
+ */
+typedef struct
+{
+  int64_t time;
+  /**< Timestamp.  (Units: @us) */
+  uint32_t cntr;
+  /**< Counter incremented upon data logged */
+  float Winv_matrix[9];
+  /**< Winv for mag cal */
+  float offset_vector[3];
+  /**< offset vector for mag cal */
+  float Rotation_matrix[9];
+  /**< Rot matrix for mag cal */
+} MagCalibrationResults;
+
+/**
  * Snapdragon Navigator cached data for the sn_get_flight_data_ptr() function.
  */
 typedef struct
@@ -1055,6 +1189,10 @@ typedef struct
   Imu2Raw imu_2_raw;
   /**< Inertial measurement unit 2 raw data. */
   Imu0Compensated imu_0_compensated;
+  /**< Inertial measurement unit (IMU) data after compensation. */
+  Imu1Compensated imu_1_compensated;
+  /**< Inertial measurement unit (IMU) data after compensation. */
+  Imu2Compensated imu_2_compensated;
   /**< Inertial measurement unit (IMU) data after compensation. */
   Imu0CalibrationThermal imu_0_calibration_thermal;
   /**< Data results from IMU temperature calibration. */
@@ -1092,6 +1230,8 @@ typedef struct
   /**< Downfacing camera calibration for tilt angle (optic flow camera yaw calibration). */
   Gps0Raw gps_0_raw;
   /**< Raw GPS data. */
+  Gps1Raw gps_1_raw;
+  /**< Raw GPS data. */
   TrajectoryDataRaw trajectory_data_raw;
   /**< Raw API data for trajectory control input. */
   PosVel pos_vel;
@@ -1113,13 +1253,18 @@ typedef struct
   GpsOrigin gps_origin;
   /**< GPS latitude and longitude at the time of initial GPS lock. */
   Vio0Raw vio_0_raw;
-  /**< Outputs of mvVISLAM transformed into SNAV's Z-up VIO frame. Field names are based on those in mvVISLAM API. Refer to the mvVISLAM API documentation for more information about these fields. */
+  /**< Output from the mvVISLAM API transformed into the Snapdragon Navigator VIO frame, which is defined by the vehicle frame at VIO initialization. Field names are based on fields in the mvVISLAM API. Refer to the <a href="https://developer.qualcomm.com/software/machine-vision-sdk/tools\>Machine Vision SDK"</a> for more information about these fields. */
+  DesiredEscState desired_esc_state;
   FiducialMarkerWorldOffsetRaw fiducial_marker_world_offset_raw;
   /**< Raw world offset computation from fiducial markers. */
   FiducialMarkerWorldOffsetData fiducial_marker_world_offset_data;
   /**< Filtered world offset computation from fiducial markers. */
   SimGroundTruth sim_ground_truth;
   /**< Simulation ground truth. */
+  MagDataForCalibration mag_data_for_calibration;
+  /**< Mag calibration data */
+  MagCalibrationResults mag_calibration_results;
+  /**< Mag matrix calibration data */
 } SnavCachedData;
 
 /** @} */ /* end_addtogroup sn_datatypes */

@@ -89,7 +89,7 @@ typedef enum
   SN_POS_HOLD_MODE,
   /**< Body-relative 3D velocity and yaw rate. */
   SN_POS_LANDING_MODE,
-  /**< 3D velocity-controlled descent using best available sensors. */
+  /**< 3D velocity-controlled descent using the best sensors available. */
 } SnMode;
 
 /**

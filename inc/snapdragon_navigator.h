@@ -36,7 +36,7 @@
 #define __SNAV_EXTERNAL_SYMBOL_ATTRIBUTE
 #endif // __SNAV_EXTERNAL_SYMBOL_ATTRIBUTE
 
-#define VERSION "1.2.53.1"
+#define VERSION "1.2.58"
 
 #define DEPRECATED __attribute__((deprecated))
 
@@ -526,7 +526,7 @@ int sn_apply_cmd_mapping(SnRcCommandType type, SnRcCommandOptions options,
  * @dependencies
  * None.
  */
-const char * sn_get_enum_string(char* type, int value) __SNAV_EXTERNAL_SYMBOL_ATTRIBUTE;
+const char * sn_get_enum_string(const char* type, int value) __SNAV_EXTERNAL_SYMBOL_ATTRIBUTE;
 
 /**
  * Gets the the name of an RC command from the type.

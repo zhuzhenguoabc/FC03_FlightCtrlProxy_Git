@@ -4,8 +4,8 @@
 CC = arm-linux-gnueabihf-gcc
 CXX = arm-linux-gnueabihf-g++
 
-CFLAGS = -Wall -Wno-unused-variable -Wno-unused-but-set-parameter -Wno-unused-but-set-variable
-CXXFLAGS = -Wall -Wno-unused-variable -Wno-unused-but-set-parameter -Wno-unused-but-set-variable -std=c++0x
+CFLAGS = -Wall -Wno-unused-variable -Wno-unused-but-set-parameter -Wno-unused-but-set-variable -Wno-write-strings
+CXXFLAGS = -Wall -Wno-unused-variable -Wno-unused-but-set-parameter -Wno-unused-but-set-variable  -Wno-write-strings -std=c++0x
 
 LIB_DIR = ./lib
 INCLUDES	= -I ./inc 
@@ -36,7 +36,7 @@ LIBS	+=	$(LIB_DIR)/libcamera.so.0 \
 					$(LIB_DIR)/libgomp.so.1 \
 										
 
-TARGET = flightctrl_proxy  drone_calibration_test ota
+TARGET = flightctrl_proxy  drone_calibration_test led_light_test
 
 all: $(TARGET)
 
