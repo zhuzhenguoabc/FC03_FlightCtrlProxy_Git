@@ -32,7 +32,7 @@
 using namespace std;
 
 
-#define __DEBUG
+//#define __DEBUG
 
 #ifdef __DEBUG
 #define DEBUG(format, ...) printf(format, ##__VA_ARGS__)

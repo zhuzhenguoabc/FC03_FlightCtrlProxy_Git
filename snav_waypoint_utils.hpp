@@ -9,7 +9,7 @@
 // define a constraining macro for ease of use
 #define MIN(var_min,var1,var2) {if ((var1) <= (var2)) var_min = var1;else if ((var1) > (var2)) var_min = var2;}
 
-#define __DEBUG
+//#define __DEBUG
 
 #ifdef __DEBUG
 #define DEBUG(format, ...) printf(format, ##__VA_ARGS__)
@@ -41,8 +41,8 @@ struct FlatVars
 
 struct FlatGpsVars
 {
-  int32_t latitude;		/**< Position latitude.  (Units: deg*10e7) */
-  int32_t longitude;	/**< Position latitude.  (Units: deg*10e7) */
+  int32_t latitude;     /**< Position latitude.  (Units: deg*10e7) */
+  int32_t longitude;    /**< Position latitude.  (Units: deg*10e7) */
 };
 
 
@@ -62,8 +62,26 @@ float constrain_min_max(float input, float min, float max)
     return input;
 }
 
-static float max_lin_velocity = .5; // maximum linear velocity in m/s
-static float max_lin_acceleration = .25; // maximum linear acceleration in m/s/s
+/****************POS_HOLD_MODE_ON*******************/
+//float xyz_reach_point_mag = ;
+float xyz_last_vel_mag = 0.2;
+float xyz_last_vel_mag_for_plan = 0.6;
+
+//float yaw_diff_abs = ;
+float last_yaw = 0.6;  //0.02
+
+static float max_lin_velocity = 2;  //1; //.5; // maximum linear velocity in m/s
+static float max_lin_acceleration = 0.8;    //0.5;    // .25; // maximum linear acceleration in m/s/s
+
+static float max_lin_velocity_for_circle = 0.8;
+static float max_lin_acceleration_for_circle = 0.3;
+
+static float max_lin_velocity_for_gps = 1;  //.5; // maximum linear velocity in m/s
+static float max_lin_acceleration_for_gps = 0.5;  //.25; // maximum linear acceleration in m/s/s
+
+static float max_lin_velocity_for_plan = 1.5;  //.5; // maximum linear velocity in m/s
+static float max_lin_acceleration_for_plan = 0.75;  //.25; // maximum linear acceleration in m/s/s
+
 
 static float max_ang_velocity = 1.0; // desired velocity in rad/s
 static float max_ang_acceleration = 0.5; // desired acceleration in rad/s/s
@@ -198,6 +216,9 @@ int goto_waypoint(FlatVars input_state, FlatVars goal_state, FlatVars last_comma
     current_cmd_world_velocity.z = current_cmd_world_velocity.z/current_vel_mag*max_lin_velocity;
   }
 
+  DEBUG("goto_waypoint goal_vec_mag:%f, unit_vec_to_goal_x=%f, des_vel_change_x=%f, des_vel_change_mag=%f, dt=%f, accel_applied_x=%f\n",
+            goal_vec_mag, unit_vec_to_goal_x, des_vel_change_x, des_vel_change_mag, dt, accel_applied_x);
+
   // *****************************************************************************
   // ***** For goal_reached condition, use closest point from line segment   *****
   // ***** between last 2 positions, and compare to goal condition           *****
@@ -255,7 +276,8 @@ int goto_waypoint(FlatVars input_state, FlatVars goal_state, FlatVars last_comma
     *reached_goal=*reached_goal&0b00011111;
   }
   // if low veloctiy (x,y, and z velocity), set velocity flags to 0
-  if ((last_vel_mag<.01) || (stop_at_waypoint == false))
+  //if ((last_vel_mag<.01) || (stop_at_waypoint == false))
+  if ((last_vel_mag<xyz_last_vel_mag) || (stop_at_waypoint == false))
   {
     *reached_goal=*reached_goal&0b11110001;
   }
@@ -321,7 +343,7 @@ int goto_waypoint(FlatVars input_state, FlatVars goal_state, FlatVars last_comma
     *reached_goal=*reached_goal&0b11101111;
   }
   // if yaw velocity within threshhold of zero, set set yaw velocity flag to 0
-  if((fabs(last_commanded_world_velocity.yaw) < 0.02) || (stop_at_waypoint == false))
+  if((fabs(last_commanded_world_velocity.yaw) < last_yaw) || (stop_at_waypoint == false))
   {
     *reached_goal=*reached_goal&0b11111110;
   }
@@ -331,6 +353,9 @@ int goto_waypoint(FlatVars input_state, FlatVars goal_state, FlatVars last_comma
     current_cmd_world_velocity.yaw = 0;
   }
 
+  DEBUG("goto_waypoint yaw_error:%f, des_ang_velocity=%f, des_vel_change_yaw=%f, accel_applied_yaw=%f, dt=%f, current_cmd_world_velocity.yaw=%f\n",
+            yaw_error, des_ang_velocity, des_vel_change_yaw, accel_applied_yaw, dt, current_cmd_world_velocity.yaw);
+
   // *******************************
   // ***** Set output velocity *****
   // *******************************
@@ -339,6 +364,9 @@ int goto_waypoint(FlatVars input_state, FlatVars goal_state, FlatVars last_comma
   cmd_out->y = current_cmd_world_velocity.y;
   cmd_out->z = current_cmd_world_velocity.z;
   cmd_out->yaw = current_cmd_world_velocity.yaw;
+
+  DEBUG("goto_waypoint goal_closest_point_mag:%f, last_vel_mag=%f, yaw_error_abs=%f, last_yaw=%f\n",
+            goal_closest_point_mag, last_vel_mag, yaw_error_abs, last_commanded_world_velocity.yaw);
 
   // Save previous velocity to check for reset
   memcpy(&previous_desired_velocity,&current_cmd_world_velocity,sizeof(FlatVars));
@@ -407,14 +435,14 @@ int goto_waypoint_with_gps(FlatVars input_state, FlatVars goal_state, FlatVars l
   else{unit_vec_to_goal_x = goal_vec_x/goal_vec_mag;unit_vec_to_goal_y = goal_vec_y/goal_vec_mag;unit_vec_to_goal_z = goal_vec_z/goal_vec_mag;}
 
   // compute maximum possible velocity capable of stopping under maximum acceleration
-  float max_vel_close_mag = sqrtf(2*max_lin_acceleration*goal_vec_mag);
+  float max_vel_close_mag = sqrtf(2*max_lin_acceleration_for_gps*goal_vec_mag);
 
   // now compute the desired magnitude of velocity as the smaller of the stopping velocity and max allowed velocity
-  float des_velocity = max_lin_velocity;
+  float des_velocity = max_lin_velocity_for_gps;
 
   if(stop_at_waypoint == true)
   {
-    MIN(des_velocity,max_vel_close_mag,max_lin_velocity);
+    MIN(des_velocity,max_vel_close_mag,max_lin_velocity_for_gps);
   }
 
   // compute the desired change vector to achieve the desired velocity and its magnitude
@@ -430,9 +458,9 @@ int goto_waypoint_with_gps(FlatVars input_state, FlatVars goal_state, FlatVars l
   else{unit_des_vel_change_x = des_vel_change_x/des_vel_change_mag;unit_des_vel_change_y = des_vel_change_y/des_vel_change_mag;unit_des_vel_change_z = des_vel_change_z/des_vel_change_mag;}
 
   // compute applied acceleration to influence velocity in correct direction
-  float accel_applied_x = unit_des_vel_change_x*max_lin_acceleration;
-  float accel_applied_y = unit_des_vel_change_y*max_lin_acceleration;
-  float accel_applied_z = unit_des_vel_change_z*max_lin_acceleration;
+  float accel_applied_x = unit_des_vel_change_x*max_lin_acceleration_for_gps;
+  float accel_applied_y = unit_des_vel_change_y*max_lin_acceleration_for_gps;
+  float accel_applied_z = unit_des_vel_change_z*max_lin_acceleration_for_gps;
 
   // apply this acceleration to influence velocity in correct direction
   current_cmd_world_velocity.x = last_commanded_world_velocity.x + accel_applied_x*dt;
@@ -441,11 +469,11 @@ int goto_waypoint_with_gps(FlatVars input_state, FlatVars goal_state, FlatVars l
 
   // bound current velocity by specified limit
   float current_vel_mag = sqrtf(current_cmd_world_velocity.x*current_cmd_world_velocity.x+current_cmd_world_velocity.y*current_cmd_world_velocity.y+current_cmd_world_velocity.z*current_cmd_world_velocity.z);
-  if (current_vel_mag > max_lin_velocity)
+  if (current_vel_mag > max_lin_velocity_for_gps)
   {
-    current_cmd_world_velocity.x = current_cmd_world_velocity.x/current_vel_mag*max_lin_velocity;
-    current_cmd_world_velocity.y = current_cmd_world_velocity.y/current_vel_mag*max_lin_velocity;
-    current_cmd_world_velocity.z = current_cmd_world_velocity.z/current_vel_mag*max_lin_velocity;
+    current_cmd_world_velocity.x = current_cmd_world_velocity.x/current_vel_mag*max_lin_velocity_for_gps;
+    current_cmd_world_velocity.y = current_cmd_world_velocity.y/current_vel_mag*max_lin_velocity_for_gps;
+    current_cmd_world_velocity.z = current_cmd_world_velocity.z/current_vel_mag*max_lin_velocity_for_gps;
   }
 
   // *****************************************************************************
@@ -505,7 +533,7 @@ int goto_waypoint_with_gps(FlatVars input_state, FlatVars goal_state, FlatVars l
     *reached_goal=*reached_goal&0b00011111;
   }
   // if low veloctiy (x,y, and z velocity), set velocity flags to 0
-  if ((last_vel_mag<0.3) || (stop_at_waypoint == false))
+  if ((last_vel_mag<xyz_last_vel_mag) || (stop_at_waypoint == false))
   {
     *reached_goal=*reached_goal&0b11110001;
   }
@@ -571,7 +599,7 @@ int goto_waypoint_with_gps(FlatVars input_state, FlatVars goal_state, FlatVars l
     *reached_goal=*reached_goal&0b11101111;
   }
   // if yaw velocity within threshhold of zero, set set yaw velocity flag to 0
-  if((fabs(last_commanded_world_velocity.yaw) < 0.02) || (stop_at_waypoint == false))
+  if((fabs(last_commanded_world_velocity.yaw) < last_yaw) || (stop_at_waypoint == false))
   {
     *reached_goal=*reached_goal&0b11111110;
   }
@@ -589,6 +617,9 @@ int goto_waypoint_with_gps(FlatVars input_state, FlatVars goal_state, FlatVars l
   cmd_out->y = current_cmd_world_velocity.y;
   cmd_out->z = current_cmd_world_velocity.z;
   cmd_out->yaw = current_cmd_world_velocity.yaw;
+
+  DEBUG("goto_waypoint_gps goal_closest_point_mag:%f, last_vel_mag=%f, yaw_error_abs=%f\n",
+            goal_closest_point_mag, last_vel_mag, yaw_error_abs);
 
   // Save previous velocity to check for reset
   memcpy(&previous_desired_velocity,&current_cmd_world_velocity,sizeof(FlatVars));
@@ -657,14 +688,14 @@ int goto_waypoint_for_circle(FlatVars input_state, FlatVars goal_state, FlatVars
   else{unit_vec_to_goal_x = goal_vec_x/goal_vec_mag;unit_vec_to_goal_y = goal_vec_y/goal_vec_mag;unit_vec_to_goal_z = goal_vec_z/goal_vec_mag;}
 
   // compute maximum possible velocity capable of stopping under maximum acceleration
-  float max_vel_close_mag = sqrtf(2*max_lin_acceleration*goal_vec_mag);
+  float max_vel_close_mag = sqrtf(2*max_lin_acceleration_for_circle*goal_vec_mag);
 
   // now compute the desired magnitude of velocity as the smaller of the stopping velocity and max allowed velocity
-  float des_velocity = max_lin_velocity;
+  float des_velocity = max_lin_velocity_for_circle;
 
   if(stop_at_waypoint == true)
   {
-    MIN(des_velocity,max_vel_close_mag,max_lin_velocity);
+    MIN(des_velocity,max_vel_close_mag,max_lin_velocity_for_circle);
   }
 
   // compute the desired change vector to achieve the desired velocity and its magnitude
@@ -680,9 +711,9 @@ int goto_waypoint_for_circle(FlatVars input_state, FlatVars goal_state, FlatVars
   else{unit_des_vel_change_x = des_vel_change_x/des_vel_change_mag;unit_des_vel_change_y = des_vel_change_y/des_vel_change_mag;unit_des_vel_change_z = des_vel_change_z/des_vel_change_mag;}
 
   // compute applied acceleration to influence velocity in correct direction
-  float accel_applied_x = unit_des_vel_change_x*max_lin_acceleration;
-  float accel_applied_y = unit_des_vel_change_y*max_lin_acceleration;
-  float accel_applied_z = unit_des_vel_change_z*max_lin_acceleration;
+  float accel_applied_x = unit_des_vel_change_x*max_lin_acceleration_for_circle;
+  float accel_applied_y = unit_des_vel_change_y*max_lin_acceleration_for_circle;
+  float accel_applied_z = unit_des_vel_change_z*max_lin_acceleration_for_circle;
 
   // apply this acceleration to influence velocity in correct direction
   current_cmd_world_velocity.x = last_commanded_world_velocity.x + accel_applied_x*dt;
@@ -691,11 +722,11 @@ int goto_waypoint_for_circle(FlatVars input_state, FlatVars goal_state, FlatVars
 
   // bound current velocity by specified limit
   float current_vel_mag = sqrtf(current_cmd_world_velocity.x*current_cmd_world_velocity.x+current_cmd_world_velocity.y*current_cmd_world_velocity.y+current_cmd_world_velocity.z*current_cmd_world_velocity.z);
-  if (current_vel_mag > max_lin_velocity)
+  if (current_vel_mag > max_lin_velocity_for_circle)
   {
-    current_cmd_world_velocity.x = current_cmd_world_velocity.x/current_vel_mag*max_lin_velocity;
-    current_cmd_world_velocity.y = current_cmd_world_velocity.y/current_vel_mag*max_lin_velocity;
-    current_cmd_world_velocity.z = current_cmd_world_velocity.z/current_vel_mag*max_lin_velocity;
+    current_cmd_world_velocity.x = current_cmd_world_velocity.x/current_vel_mag*max_lin_velocity_for_circle;
+    current_cmd_world_velocity.y = current_cmd_world_velocity.y/current_vel_mag*max_lin_velocity_for_circle;
+    current_cmd_world_velocity.z = current_cmd_world_velocity.z/current_vel_mag*max_lin_velocity_for_circle;
   }
 
   // *****************************************************************************
@@ -751,14 +782,14 @@ int goto_waypoint_for_circle(FlatVars input_state, FlatVars goal_state, FlatVars
 
   // if close to goal (x,y, and z position), set position flags to 0
   //if (goal_closest_point_mag<.05)
-  if (goal_closest_point_mag<.1)
+  if (goal_closest_point_mag<.3)
   //if (goal_closest_point_mag<.2)
   {
     *reached_goal=*reached_goal&0b00011111;
   }
   // if low veloctiy (x,y, and z velocity), set velocity flags to 0
   //if ((last_vel_mag<.01) || (stop_at_waypoint == false))
-  if ((last_vel_mag<.05) || (stop_at_waypoint == false))
+  if ((last_vel_mag<xyz_last_vel_mag) || (stop_at_waypoint == false))
   //if ((last_vel_mag<.1) || (stop_at_waypoint == false))
   {
     *reached_goal=*reached_goal&0b11110001;
@@ -827,9 +858,7 @@ int goto_waypoint_for_circle(FlatVars input_state, FlatVars goal_state, FlatVars
     *reached_goal=*reached_goal&0b11101111;
   }
   // if yaw velocity within threshhold of zero, set set yaw velocity flag to 0
-  //if((fabs(last_commanded_world_velocity.yaw) < 0.02) || (stop_at_waypoint == false))
-  if((fabs(last_commanded_world_velocity.yaw) < 0.05) || (stop_at_waypoint == false))
-  //if((fabs(last_commanded_world_velocity.yaw) < 0.1) || (stop_at_waypoint == false))
+  if((fabs(last_commanded_world_velocity.yaw) < last_yaw) || (stop_at_waypoint == false))
   {
     *reached_goal=*reached_goal&0b11111110;
   }
@@ -848,13 +877,17 @@ int goto_waypoint_for_circle(FlatVars input_state, FlatVars goal_state, FlatVars
   cmd_out->z = current_cmd_world_velocity.z;
   cmd_out->yaw = current_cmd_world_velocity.yaw;
 
+
+  DEBUG("circle goal_closest_point_mag:%f, last_vel_mag=%f, yaw_error_abs=%f\n",
+            goal_closest_point_mag, last_vel_mag, yaw_error_abs);
+
   // Save previous velocity to check for reset
   memcpy(&previous_desired_velocity,&current_cmd_world_velocity,sizeof(FlatVars));
 
   return 0;
 }
 
-int goto_waypoint_for_customized_plan(FlatVars input_state, FlatVars goal_state, FlatVars last_commanded_world_velocity, bool stop_at_waypoint, FlatVars * cmd_out, uint8_t * reached_goal, bool yaw_only)
+int goto_waypoint_for_customized_plan(FlatVars input_state, FlatVars goal_state, FlatVars last_commanded_world_velocity, bool stop_at_waypoint, FlatVars * cmd_out, uint8_t * reached_goal, bool yaw_only, float xyz_goal_deviation, bool ignore_z_vel)
 {
   // This function computes the desired velocity to reach a goal state (location+yaw) from a starting state while respecting dynamics and obeying a maximum velocity and acceleration
   // This function requires as input the previously specified velocity to ensure continuity in velocity.
@@ -915,14 +948,14 @@ int goto_waypoint_for_customized_plan(FlatVars input_state, FlatVars goal_state,
   else{unit_vec_to_goal_x = goal_vec_x/goal_vec_mag;unit_vec_to_goal_y = goal_vec_y/goal_vec_mag;unit_vec_to_goal_z = goal_vec_z/goal_vec_mag;}
 
   // compute maximum possible velocity capable of stopping under maximum acceleration
-  float max_vel_close_mag = sqrtf(2*max_lin_acceleration*goal_vec_mag);
+  float max_vel_close_mag = sqrtf(2*max_lin_acceleration_for_plan*goal_vec_mag);
 
   // now compute the desired magnitude of velocity as the smaller of the stopping velocity and max allowed velocity
-  float des_velocity = max_lin_velocity;
+  float des_velocity = max_lin_velocity_for_plan;
 
   if(stop_at_waypoint == true)
   {
-    MIN(des_velocity,max_vel_close_mag,max_lin_velocity);
+    MIN(des_velocity,max_vel_close_mag,max_lin_velocity_for_plan);
   }
 
   // compute the desired change vector to achieve the desired velocity and its magnitude
@@ -938,9 +971,9 @@ int goto_waypoint_for_customized_plan(FlatVars input_state, FlatVars goal_state,
   else{unit_des_vel_change_x = des_vel_change_x/des_vel_change_mag;unit_des_vel_change_y = des_vel_change_y/des_vel_change_mag;unit_des_vel_change_z = des_vel_change_z/des_vel_change_mag;}
 
   // compute applied acceleration to influence velocity in correct direction
-  float accel_applied_x = unit_des_vel_change_x*max_lin_acceleration;
-  float accel_applied_y = unit_des_vel_change_y*max_lin_acceleration;
-  float accel_applied_z = unit_des_vel_change_z*max_lin_acceleration;
+  float accel_applied_x = unit_des_vel_change_x*max_lin_acceleration_for_plan;
+  float accel_applied_y = unit_des_vel_change_y*max_lin_acceleration_for_plan;
+  float accel_applied_z = unit_des_vel_change_z*max_lin_acceleration_for_plan;
 
   // apply this acceleration to influence velocity in correct direction
   current_cmd_world_velocity.x = last_commanded_world_velocity.x + accel_applied_x*dt;
@@ -949,11 +982,11 @@ int goto_waypoint_for_customized_plan(FlatVars input_state, FlatVars goal_state,
 
   // bound current velocity by specified limit
   float current_vel_mag = sqrtf(current_cmd_world_velocity.x*current_cmd_world_velocity.x+current_cmd_world_velocity.y*current_cmd_world_velocity.y+current_cmd_world_velocity.z*current_cmd_world_velocity.z);
-  if (current_vel_mag > max_lin_velocity)
+  if (current_vel_mag > max_lin_velocity_for_plan)
   {
-    current_cmd_world_velocity.x = current_cmd_world_velocity.x/current_vel_mag*max_lin_velocity;
-    current_cmd_world_velocity.y = current_cmd_world_velocity.y/current_vel_mag*max_lin_velocity;
-    current_cmd_world_velocity.z = current_cmd_world_velocity.z/current_vel_mag*max_lin_velocity;
+    current_cmd_world_velocity.x = current_cmd_world_velocity.x/current_vel_mag*max_lin_velocity_for_plan;
+    current_cmd_world_velocity.y = current_cmd_world_velocity.y/current_vel_mag*max_lin_velocity_for_plan;
+    current_cmd_world_velocity.z = current_cmd_world_velocity.z/current_vel_mag*max_lin_velocity_for_plan;
   }
 
   // *****************************************************************************
@@ -1007,16 +1040,32 @@ int goto_waypoint_for_customized_plan(FlatVars input_state, FlatVars goal_state,
                                        (goal_state.y-goal_closest_point_y)*(goal_state.y-goal_closest_point_y) +
                                        (goal_state.z-goal_closest_point_z)*(goal_state.z-goal_closest_point_z));
 
+  float goal_closest_xy_mag = sqrtf((goal_state.x-goal_closest_point_x)*(goal_state.x-goal_closest_point_x) +
+                                       (goal_state.y-goal_closest_point_y)*(goal_state.y-goal_closest_point_y));
   // if close to goal (x,y, and z position), set position flags to 0
-  if ((goal_closest_point_mag<.1) || (yaw_only == true))
+  // if ((goal_closest_point_mag<.1) || (yaw_only == true))
+
+  if (ignore_z_vel)
   {
-    *reached_goal=*reached_goal&0b00011111;
+      if ((goal_closest_xy_mag < xyz_goal_deviation) || (yaw_only == true))
+      {
+        *reached_goal=*reached_goal&0b00011111;
+      }
   }
+  else
+  {
+      if ((goal_closest_point_mag < xyz_goal_deviation) || (yaw_only == true))
+      {
+        *reached_goal=*reached_goal&0b00011111;
+      }
+  }
+
   // if low veloctiy (x,y, and z velocity), set velocity flags to 0
-  if ((last_vel_mag<.01) || (stop_at_waypoint == false) || (yaw_only == true))
+  if ((last_vel_mag<xyz_last_vel_mag_for_plan) || (stop_at_waypoint == false) || (yaw_only == true))
   {
     *reached_goal=*reached_goal&0b11110001;
   }
+
   // if close to goal and low velocity, command 0 lateral velocity
   if (((*reached_goal&0b11101110) == 0) && (stop_at_waypoint == true))
   {
@@ -1075,12 +1124,12 @@ int goto_waypoint_for_customized_plan(FlatVars input_state, FlatVars goal_state,
 
   // if yaw error within threshhold of zero, set set yaw position flag to 0
   //if((yaw_error_abs<.008) || (stop_at_waypoint == false))
-  if(yaw_error_abs<.008)
+  if((yaw_error_abs<.015) || (yaw_only == false))
   {
     *reached_goal=*reached_goal&0b11101111;
   }
   // if yaw velocity within threshhold of zero, set set yaw velocity flag to 0
-  if((fabs(last_commanded_world_velocity.yaw) < 0.02) || (stop_at_waypoint == false))
+  if((fabs(last_commanded_world_velocity.yaw) < last_yaw) || (stop_at_waypoint == false))
   {
     *reached_goal=*reached_goal&0b11111110;
   }
@@ -1106,6 +1155,9 @@ int goto_waypoint_for_customized_plan(FlatVars input_state, FlatVars goal_state,
     cmd_out->y = 0;
     cmd_out->z = 0;
   }
+
+  DEBUG("customized_plan goal_closest_point_mag:%f, last_vel_mag=%f, yaw_error_abs=%f\n",
+            goal_closest_point_mag, last_vel_mag, yaw_error_abs);
 
   // Save previous velocity to check for reset
   memcpy(&previous_desired_velocity,&current_cmd_world_velocity,sizeof(FlatVars));
@@ -1273,7 +1325,7 @@ int goto_waypoint_for_reduce_height(FlatVars input_state, FlatVars goal_state, F
     *reached_goal=*reached_goal&0b00011111;
   }
   // if low veloctiy (x,y, and z velocity), set velocity flags to 0
-  if ((last_vel_mag<.05) || (stop_at_waypoint == false))
+  if ((last_vel_mag<xyz_last_vel_mag) || (stop_at_waypoint == false))
   {
     *reached_goal=*reached_goal&0b11110001;
   }
@@ -1339,7 +1391,7 @@ int goto_waypoint_for_reduce_height(FlatVars input_state, FlatVars goal_state, F
     *reached_goal=*reached_goal&0b11101111;
   }
   // if yaw velocity within threshhold of zero, set set yaw velocity flag to 0
-  if((fabs(last_commanded_world_velocity.yaw) < 0.05) || (stop_at_waypoint == false))
+  if((fabs(last_commanded_world_velocity.yaw) < last_yaw) || (stop_at_waypoint == false))
   {
     *reached_goal=*reached_goal&0b11111110;
   }

@@ -31,7 +31,7 @@
 using namespace std;
 
 
-#define __DEBUG
+//#define __DEBUG
 
 #ifdef __DEBUG
 #define DEBUG(format, ...)  printf(format, ##__VA_ARGS__)
@@ -48,7 +48,7 @@ using namespace std;
 #define LOW_BATTERY_AUTO_LANDING                    // auto land when battery is low
 #define IR_AVOIDANCE
 
-#define CIRCLE_HEIGHT_LIMIT_FLAG
+//#define CIRCLE_HEIGHT_LIMIT_FLAG
 #define DISCONN_AUTO_RETURN
 #define USE_FAN_SWITCH
 #define NO_FLY_ZONE
@@ -74,6 +74,8 @@ using namespace std;
 //#define ZZG_SONAR_DEBUG_FLAG
 //#define ZZG_FINAL_CMD_FLAG
 //#define ZZG_TMP_DEBUG_FLAG
+
+#define VIO_DATA_REPLACE_POS_HOLD
 
 /****************************************************************/
 /****************************************************************/
@@ -439,6 +441,7 @@ struct PlanPosition
   float z;   // m
   float yaw;
   bool yaw_only;
+  bool ignore_z_vel;
 };
 
 
@@ -646,6 +649,8 @@ void setCfg(char* item, char* value)
     }
     */
 
+    DEBUG("setCfg item=%s, value=%s!\n", item, value);
+
     bool bHave = false;
 
     char buf[TMP_BUFF_LEN];
@@ -787,6 +792,9 @@ void getCfg(char* item, char *value)
                 if (strncmp(blank_trim_item, item, strlen(item)) == 0)
                 {
                     strncpy(value, blank_trim_value, strlen(blank_trim_value));
+
+                    DEBUG("getCfg item=%s, value=%s!\n", item, value);
+
                     fclose(fp);
                     return;
                 }
@@ -1312,7 +1320,7 @@ void* ThreadGetVideoBodyFollowParam(void*)
                         DEBUG("follow track_result center_x:%d center_y:%d\n",center_x,center_y);
 
                         if(track_result.width < init_width && track_result.width != 0)
-                            velocity_forward = (init_width/track_result.width -1.0)*10;
+                            velocity_forward = (init_width/track_result.width -1.0)*5;
                         else
                             velocity_forward = 0;
 
@@ -2061,7 +2069,7 @@ void* ThreadInfrared(void*)
         }
         */
 
-        usleep(20000);  //20ms
+        usleep(10000);  //10ms
 
         while (count < 3)
         {
@@ -2134,6 +2142,9 @@ int main(int argc, char* argv[])
     float sonar_valid_data_max = 2;
 #endif
 
+    float xy_eff = 0.966;
+    float z_eff = 0.259;
+
     int use_revise_height = 0;              // revise height with barometer and sonar, need to open USE_REVISE_HEIGHT first
 
     int reverse_rule_sample_size = 0;       // Optic flow mode reverse rule: sample_size missing
@@ -2190,7 +2201,7 @@ int main(int argc, char* argv[])
     bool calcCirclePoint = false;
     vector<Position> circle_positions;
     float radius = 2.5f;                    // m: default-circle-radius
-    int point_count = 36;                   // default-circle-point-count
+    int point_count = 18;   //36;                   // default-circle-point-count
     float angle_per = 2*M_PI/point_count;
     int clockwise = 1;                      // anticlockwise = -1
 
@@ -2510,6 +2521,36 @@ int main(int argc, char* argv[])
     circle_height_limit = sonar_valid_data_max*0.8;
 #endif
 
+
+#ifdef IR_AVOIDANCE
+    char ir_dis_safe[TMP_BUFF_LEN];
+    memset(ir_dis_safe, 0, TMP_BUFF_LEN);
+
+    /* cfg */
+    getCfg(FC_CFG_ITEM_IR, ir_dis_safe);
+    if (strlen(ir_dis_safe) >= 1)
+    {
+        ir_dft_safe_distance = atof(ir_dis_safe);
+    }
+    else
+    {
+        ir_dft_safe_distance = 1.5;
+        memset(ir_dis_safe, 0, TMP_BUFF_LEN);
+        snprintf(ir_dis_safe, sizeof(ir_dis_safe), "%f", ir_dft_safe_distance);
+        setCfg(FC_CFG_ITEM_IR, ir_dis_safe);
+    }
+
+    if (ir_dft_safe_distance <= 0)
+    {
+        use_infrared = 0;
+    }
+    else
+    {
+        use_infrared = 1;
+    }
+    /* cfg */
+#endif
+
     /****************************************************************************/
     /****************************************************************************/
     /**************************Confirm logfile name start************************/
@@ -2542,6 +2583,7 @@ int main(int argc, char* argv[])
         char str[16];
         if ((fp_count_write = fopen(FC_LOG_PATH PATH_FLAG FC_LOG_CT_NAME, "w+")) != NULL)
         {
+            memset(str, 0, sizeof(str));
             snprintf(str, sizeof(str), "%d", log_count);
             fwrite(str, strlen(str), 1, fp_count_write);
             fclose(fp_count_write);
@@ -3042,7 +3084,7 @@ int main(int argc, char* argv[])
             udp_array = split(udp_buff_data, STR_SEPARATOR);
 
             /* only ignore the too quick control cmd */
-            if (((time_temp_now - last_client_msg_time) < 0.006)    //6ms
+            if (((time_temp_now - last_client_msg_time) < 0.002)    //2ms
                 && (udp_array.size() >= 6)
                 && (udp_array[0].compare(SNAV_CMD_CONROL) == 0))
             {
@@ -3111,7 +3153,7 @@ int main(int argc, char* argv[])
 #ifdef  IR_AVOIDANCE
             if (use_infrared == 1)
             {
-                DEBUG("[%d] Infrared distance=%f \n", loop_counter, ir_distance);
+                DEBUG("[%d] Infrared distance=%f time_now=%lf\n", loop_counter, ir_distance, time_temp_now);
             }
 #endif
 
@@ -3261,11 +3303,8 @@ int main(int argc, char* argv[])
             /* Cal the height with baro_diff and sonar End */
 
             /* Print necessary msg */
-            float vel_est_0 = snav_data->pos_vel.velocity_estimated[0];
-            float vel_est_1 = snav_data->pos_vel.velocity_estimated[1];
-
-            DEBUG("[%d] revise_height=%f, baro_groud=%f, baro_diff=%f, snav_data->sonar_0_raw.range=%f, vel_est_0=%f, vel_est_1=%f, mode=%d\n",
-                     loop_counter, revise_height, baro_groud, baro_diff, snav_data->sonar_0_raw.range, vel_est_0, vel_est_1, mode);
+            DEBUG("[%d] revise_height=%f, baro_groud=%f, baro_diff=%f, snav_data->sonar_0_raw.range=%f\n",
+                     loop_counter, revise_height, baro_groud, baro_diff, snav_data->sonar_0_raw.range);
 
             // Get the current gps estimated and desired position and yaw
             float x_est_gps, y_est_gps, z_est_gps, yaw_est_gps;
@@ -3298,10 +3337,41 @@ int main(int argc, char* argv[])
 
             // Get the current estimated position and yaw
             float x_est, y_est, z_est, yaw_est;
-            x_est = (float)snav_data->pos_vel.position_estimated[0];
-            y_est = (float)snav_data->pos_vel.position_estimated[1];
-            z_est = (float)snav_data->pos_vel.position_estimated[2];
-            yaw_est = (float)snav_data->pos_vel.yaw_estimated;
+
+#ifdef VIO_DATA_REPLACE_POS_HOLD
+            if ((mode == SN_POS_HOLD_MODE)
+                && (props_state == SN_PROPS_STATE_STARTING || props_state == SN_PROPS_STATE_SPINNING)
+                && ((float)snav_data->pos_vel.position_estimated[0] == 0)
+                && ((float)snav_data->pos_vel.position_estimated[1] == 0)
+                && ((float)snav_data->pos_vel.position_estimated[2] == 0))
+            {
+                if (snav_data->pos_vel.position_estimate_type == SN_POS_EST_TYPE_VIO)
+                {
+                    DEBUG("[%d] SN_POS_EST_TYPE_VIO use vio_data!.\n", loop_counter);
+                    x_est = (float)snav_data->vio_pos_vel.position_estimated[0];
+                    y_est = (float)snav_data->vio_pos_vel.position_estimated[1];
+                    z_est = (float)snav_data->vio_pos_vel.position_estimated[2];
+                    yaw_est = (float)snav_data->vio_pos_vel.yaw_estimated;
+                }
+                else if (snav_data->pos_vel.position_estimate_type == SN_POS_EST_TYPE_DFT)
+                {
+                    DEBUG("[%d] SN_POS_EST_TYPE_DFT use dft_data!.\n", loop_counter);
+                    x_est = (float)snav_data->optic_flow_pos_vel.position_estimated[0];
+                    y_est = (float)snav_data->optic_flow_pos_vel.position_estimated[1];
+                    z_est = (float)snav_data->optic_flow_pos_vel.position_estimated[2];
+                    yaw_est = (float)snav_data->optic_flow_pos_vel.yaw_estimated;
+                }
+            }
+            else
+            {
+#endif
+                x_est = (float)snav_data->pos_vel.position_estimated[0];
+                y_est = (float)snav_data->pos_vel.position_estimated[1];
+                z_est = (float)snav_data->pos_vel.position_estimated[2];
+                yaw_est = (float)snav_data->pos_vel.yaw_estimated;
+#ifdef VIO_DATA_REPLACE_POS_HOLD
+            }
+#endif
 
 
             // Get the current desired position and yaw
@@ -4388,7 +4458,6 @@ int main(int argc, char* argv[])
 
                             // Add by wlh-----------limit the speed to make the drone fly smoothly start
 #ifdef LINEAR_CMD_FLAG
-
                             float cmd_mag = sqrt(cmd0*cmd0 + cmd1*cmd1);
                             float last_cmd_mag = sqrt(last_cmd0*last_cmd0 + last_cmd1*last_cmd1);
 
@@ -5398,6 +5467,15 @@ int main(int argc, char* argv[])
                         snprintf(ir_safe_dis, sizeof(ir_safe_dis), "%f", ir_dft_safe_distance);
                         setCfg(FC_CFG_ITEM_IR, ir_safe_dis);
                     }
+
+                    if (ir_dft_safe_distance <= 0)
+                    {
+                        use_infrared = 0;
+                    }
+                    else
+                    {
+                        use_infrared = 1;
+                    }
                     /* cfg */
 
                     memset(ir_safe_dis, 0, TMP_BUFF_LEN);
@@ -5417,6 +5495,7 @@ int main(int argc, char* argv[])
 
                     /* cfg */
                     char ir_safe_distance[TMP_BUFF_LEN];
+                    memset(ir_safe_distance, 0, TMP_BUFF_LEN);
                     if (ir_dft_safe_distance <= 0)
                     {
                         ir_dft_safe_distance = 0;
@@ -5772,6 +5851,12 @@ int main(int argc, char* argv[])
                     use_revise_height = atoi(udp_msg_array[1].c_str());
                     DEBUG("udp receive  use_revise_height=%d\n",use_revise_height);
                 }
+                else if ((udp_msg_array.size() >= 3) && (udp_msg_array[0].compare("eff") == 0))
+                {
+                    xy_eff = atof(udp_msg_array[1].c_str());
+                    z_eff = atof(udp_msg_array[2].c_str());
+                    DEBUG("udp receive  xy_eff, z_eff:[%f,%f]\n", xy_eff, z_eff);
+                }
                 else if ((udp_msg_array.size() >= 2) && (udp_msg_array[0].compare("reduce_height") == 0))
                 {
                     use_reduce_height = atoi(udp_msg_array[1].c_str());
@@ -5814,7 +5899,7 @@ int main(int argc, char* argv[])
                 else if ((udp_msg_array.size() >= 2) && (udp_msg_array[0].compare("use_vio_switch") == 0))
                 {
                     use_vio_switch = atoi(udp_msg_array[1].c_str());
-                    DEBUG("udp receive  use_vio_switch=%f\n", use_infrared);
+                    DEBUG("udp receive  use_vio_switch=%d\n", use_vio_switch);
                 }
                 else if ((udp_msg_array.size() >= 3) && (udp_msg_array[0].compare("200qc") == 0))
                 {
@@ -6876,7 +6961,7 @@ int main(int argc, char* argv[])
                 vio_pts_sum += num_tracked_pts;
                 DEBUG("[%d] takeoff_count=%d, vio_pts_sum=%d\n", loop_counter, takeoff_count, vio_pts_sum);
 
-                if ((mode == SN_POS_HOLD_MODE/*SN_VIO_POS_HOLD_MODE*/) && (takeoff_count >= vio_ct))     // 20*20=400 ms
+                if ((mode == SN_POS_HOLD_MODE) && (takeoff_count >= vio_ct))     // 20*20=400 ms
                 {
                     vio_pts_takeoff_average = vio_pts_sum/vio_ct;
 
@@ -7525,11 +7610,11 @@ int main(int argc, char* argv[])
 
                             if (radius <= 5.0)
                             {
-                                point_count = 36;
+                                point_count = 18;   //36;
                             }
                             else
                             {
-                                point_count = 72;
+                                point_count = 36;   //72;
                             }
                             vel_target = 0.75;   //m/sec
                             angle_per = 2*M_PI/point_count;
@@ -8059,6 +8144,7 @@ int main(int argc, char* argv[])
                             for (int k = 0; k < plan_step_total; k++)
                             {
                                 pos_start.yaw_only = false;
+                                pos_start.ignore_z_vel = true;
                                 step_count = atoi(customized_plan_steps[k*2+1].c_str());
 
                                 DEBUG("[%d] plan_step, plan_count: [%s, %d]\n",
@@ -8087,22 +8173,34 @@ int main(int argc, char* argv[])
                                 else if (customized_plan_steps[k*2].compare(PLAN_UP) == 0)
                                 {
                                     pos_start.z   = pos_start.z + plan_unit*step_count;
+                                    pos_start.ignore_z_vel = false;
                                 }
                                 else if (customized_plan_steps[k*2].compare(PLAN_DOWN) == 0)
                                 {
                                     pos_start.z   = pos_start.z - plan_unit*step_count;
+                                    pos_start.ignore_z_vel = false;
                                 }
                                 else if (customized_plan_steps[k*2].compare(PLAN_ZOOM_IN) == 0)
                                 {
-                                    pos_start.x   = pos_start.x + plan_unit*step_count*0.707*cos(pos_start.yaw);
-                                    pos_start.y   = pos_start.y + plan_unit*step_count*0.707*sin(pos_start.yaw);
-                                    pos_start.z   = pos_start.z - plan_unit*step_count*0.707;
+                                    /*
+                                    pos_start.x   = pos_start.x + sqrtf(plan_unit*step_count)*cos(pos_start.yaw);
+                                    pos_start.y   = pos_start.y + sqrtf(plan_unit*step_count)*sin(pos_start.yaw);
+                                    pos_start.z   = pos_start.z - sqrtf(plan_unit*step_count);
+                                    */
+                                    pos_start.x   = pos_start.x + xy_eff*(plan_unit*step_count)*cos(pos_start.yaw);
+                                    pos_start.y   = pos_start.y + xy_eff*(plan_unit*step_count)*sin(pos_start.yaw);
+                                    pos_start.z   = pos_start.z - z_eff*(plan_unit*step_count);
                                 }
                                 else if (customized_plan_steps[k*2].compare(PLAN_ZOOM_OUT) == 0)
                                 {
-                                    pos_start.x   = pos_start.x - plan_unit*step_count*0.707*cos(pos_start.yaw);
-                                    pos_start.y   = pos_start.y - plan_unit*step_count*0.707*sin(pos_start.yaw);
-                                    pos_start.z   = pos_start.z + plan_unit*step_count*0.707;
+                                    /*
+                                    pos_start.x   = pos_start.x - sqrtf(plan_unit*step_count)*cos(pos_start.yaw);
+                                    pos_start.y   = pos_start.y - sqrtf(plan_unit*step_count)*sin(pos_start.yaw);
+                                    pos_start.z   = pos_start.z + sqrtf(plan_unit*step_count);
+                                    */
+                                    pos_start.x   = pos_start.x - xy_eff*(plan_unit*step_count)*cos(pos_start.yaw);
+                                    pos_start.y   = pos_start.y - xy_eff*(plan_unit*step_count)*sin(pos_start.yaw);
+                                    pos_start.z   = pos_start.z + z_eff*(plan_unit*step_count);
                                 }
                                 else if (customized_plan_steps[k*2].compare(PLAN_CLOCKWISE) == 0)
                                 {
@@ -8149,10 +8247,11 @@ int main(int argc, char* argv[])
 
                             for (int k = 0; k < (int)customized_plan_positions.size(); k++)
                             {
-                                DEBUG("[%d] customized_plan_positions #%d: [%f,%f,%f,%f], yaw_only:%d\n", loop_counter, k,
+                                DEBUG("[%d] customized_plan_positions #%d: [%f,%f,%f,%f], yaw_only:%d, ignore_z_vel:%d\n", loop_counter, k,
                                             customized_plan_positions[k].x, customized_plan_positions[k].y,
                                             customized_plan_positions[k].z, customized_plan_positions[k].yaw,
-                                            customized_plan_positions[k].yaw_only);
+                                            customized_plan_positions[k].yaw_only,
+                                            customized_plan_positions[k].ignore_z_vel);
                             }
                         }
 #endif
@@ -8287,7 +8386,7 @@ int main(int argc, char* argv[])
                                         circle_positions[current_position].z, circle_positions[current_position].yaw};
 
                     // Stop only at last waypoint. If stopping at all waypoints is desired, make always true
-                    if (current_position == circle_positions.size())
+                    if (current_position == (circle_positions.size() - 1))
                     {
                         stop_flag = true;
                     }
@@ -8562,18 +8661,38 @@ int main(int argc, char* argv[])
 #else
                     bool stop_flag = false;
                     bool position_yaw_only = false;
+                    bool ignore_z_vel = true;
 
-                    FlatVars current_state = {x_des-x_est_startup, y_des-y_est_startup, z_est, yaw_des};
+                    //FlatVars current_state = {x_des-x_est_startup, y_des-y_est_startup, z_est, yaw_des};
+                    FlatVars current_state = {x_est-x_est_startup, y_est-y_est_startup, z_est, yaw_est};
                     FlatVars last_vel = {vel_x_target, vel_y_target, vel_z_target, vel_yaw_target};
                     FlatVars des_pos = {customized_plan_positions[current_position].x,
                                         customized_plan_positions[current_position].y,
                                         customized_plan_positions[current_position].z,
                                         customized_plan_positions[current_position].yaw};
 
-                    position_yaw_only = customized_plan_positions[current_position].yaw_only;
+                    float xyz_goal_deviation = 0.2;     // m
+                    float xyz_goal_vel_deviation = 0.2; // m/2
+                    if ((current_position >= 1) && (current_position <= (customized_plan_positions.size()-1)))
+                    {
+                        float current_xyz_pos_mag = sqrtf(customized_plan_positions[current_position].x*customized_plan_positions[current_position].x
+                                                          +customized_plan_positions[current_position].y*customized_plan_positions[current_position].y
+                                                          +customized_plan_positions[current_position].z*customized_plan_positions[current_position].z);
+                        float last_xyz_pos_mag = sqrtf(customized_plan_positions[current_position-1].x*customized_plan_positions[current_position-1].x
+                                                        +customized_plan_positions[current_position-1].y*customized_plan_positions[current_position-1].y
+                                                        +customized_plan_positions[current_position-1].z*customized_plan_positions[current_position-1].z);
 
+                        xyz_goal_deviation *= fabs(current_xyz_pos_mag - last_xyz_pos_mag);
+                    }
+                    MIN(xyz_goal_deviation, xyz_goal_deviation, 2);
+
+
+                    position_yaw_only = customized_plan_positions[current_position].yaw_only;
+                    ignore_z_vel = customized_plan_positions[current_position].ignore_z_vel;
+
+                    /*
                     // Stop only at last waypoint. If stopping at all waypoints is desired, make always true
-                    if ((position_yaw_only == true) || (current_position == customized_plan_positions.size()))
+                    if ((position_yaw_only == true) || (current_position == (customized_plan_positions.size() - 1)))
                     {
                         stop_flag = true;
                     }
@@ -8581,14 +8700,27 @@ int main(int argc, char* argv[])
                     {
                         stop_flag = false;
                     }
+                    */
+                    stop_flag = true;
+
 
                     DEBUG("[%d]  customized_plan_mission current_state: [%f,%f,%f,%f]\n",
                                 loop_counter, current_state.x, current_state.y, current_state.z, current_state.yaw);
                     DEBUG("[%d]  customized_plan_mission des_pos: [%f,%f,%f,%f]\n",
                                 loop_counter, des_pos.x, des_pos.y, des_pos.z, des_pos.yaw);
+                    DEBUG("[%d]  customized_plan_mission current_position,xyz_goal_deviation: [%d,%f]\n",
+                                loop_counter, current_position, xyz_goal_deviation);
 
                     // Return -1 means the first point, need to set the start vel to zero.
-                    if (goto_waypoint_for_customized_plan(current_state, des_pos, last_vel, stop_flag, &output_vel, &wp_goal_ret, position_yaw_only) == -1)
+                    if (goto_waypoint_for_customized_plan(current_state,
+                                                          des_pos,
+                                                          last_vel,
+                                                          stop_flag,
+                                                          &output_vel,
+                                                          &wp_goal_ret,
+                                                          position_yaw_only,
+                                                          xyz_goal_deviation,
+                                                          ignore_z_vel) == -1)
                     {
                         if (current_position == 0)
                         {
@@ -9774,11 +9906,15 @@ int main(int argc, char* argv[])
             }
             else if (customized_plan_mission)
             {
+                /*
                 if (cmd2 < -0.1)
                 {
-                    cmd2 = cmd2*0.4;
+                    cmd2 = cmd2*0.5;
                 }
                 cmd3 = cmd3*yaw_coefficient;
+                */
+
+                cmd2 = cmd2*1.4;
             }
 #ifdef AUTO_REDUCE_HEIGHT
             else if ((use_reduce_height == 1) && auto_reduce_height_mission)
@@ -9805,48 +9941,59 @@ int main(int argc, char* argv[])
 
 
 #ifdef LINEAR_CMD_FLAG
-            float cmd_mag = sqrt(cmd0*cmd0 + cmd1*cmd1);
-            float last_cmd_mag = sqrt(last_cmd0*last_cmd0 + last_cmd1*last_cmd1);
-
-            if (fabs(cmd_mag - last_cmd_mag) > go_cmd_offset_limit
-                || fabs(cmd0 - last_cmd0) > go_cmd_offset_limit
-                || fabs(cmd1 - last_cmd1) > go_cmd_offset_limit)
+            /*if (!fly_test_mission
+                && !circle_mission
+                && !panorama_mission
+                && !return_mission
+                && !trail_navigation_mission
+                && !customized_plan_mission
+                && !face_mission
+                && !body_mission
+                && !rotation_test_mission)
+            */
             {
-                float p_bate_offset_cmd0 = fabs(cmd0 - last_cmd0);
-                float p_bate_offset_cmd1 = fabs(cmd1 - last_cmd1);
+                float cmd_mag = sqrt(cmd0*cmd0 + cmd1*cmd1);
+                float last_cmd_mag = sqrt(last_cmd0*last_cmd0 + last_cmd1*last_cmd1);
 
-
-                if (p_bate_offset_cmd0 > 0)
+                if (fabs(cmd_mag - last_cmd_mag) > go_cmd_offset_limit
+                    || fabs(cmd0 - last_cmd0) > go_cmd_offset_limit
+                    || fabs(cmd1 - last_cmd1) > go_cmd_offset_limit)
                 {
-                    cmd0 = last_cmd0+(cmd0 - last_cmd0)*go_cmd_offset_limit/p_bate_offset_cmd0;
-                }
+                    float p_bate_offset_cmd0 = fabs(cmd0 - last_cmd0);
+                    float p_bate_offset_cmd1 = fabs(cmd1 - last_cmd1);
 
-                if (p_bate_offset_cmd1 > 0)
-                {
-                    cmd1 = last_cmd1+(cmd1 - last_cmd1)*go_cmd_offset_limit/p_bate_offset_cmd1;
-                }
-            }
 
-            if (state == MissionState::TAKEOFF)
-            {
-                float last_cmd2_takoff_mag = sqrt(last_cmd2_takeoff*last_cmd2_takeoff);
-                float cmd2_takeoff_mag = sqrt(cmd2*cmd2);
-
-                //if (fabs(cmd2_takeoff_mag - last_cmd2_takoff_mag) > 0.1)    //0.2
-                if ((cmd2 > last_cmd2_takeoff) && (fabs(cmd2_takeoff_mag - last_cmd2_takoff_mag) > 0.1))
-                {
-                    float p_bate_offset_cmd2 = fabs(cmd2 - last_cmd2_takeoff);
-
-                    if (p_bate_offset_cmd2 > 0)
+                    if (p_bate_offset_cmd0 > 0)
                     {
-                        cmd2 = last_cmd2_takeoff+(cmd2 - last_cmd2_takeoff)*0.1/p_bate_offset_cmd2; //0.2
+                        cmd0 = last_cmd0+(cmd0 - last_cmd0)*go_cmd_offset_limit/p_bate_offset_cmd0;
+                    }
+
+                    if (p_bate_offset_cmd1 > 0)
+                    {
+                        cmd1 = last_cmd1+(cmd1 - last_cmd1)*go_cmd_offset_limit/p_bate_offset_cmd1;
                     }
                 }
 
-                DEBUG("[%d] TAKEOFF cmd2_takeoff_mag:cmd2[%f,%f], last_cmd2_takoff_mag:last_cmd2_takeoff[%f,%f]\n",
-                                loop_counter, cmd2_takeoff_mag, cmd2, last_cmd2_takoff_mag, last_cmd2_takeoff);
+                if (state == MissionState::TAKEOFF)
+                {
+                    float last_cmd2_takoff_mag = sqrt(last_cmd2_takeoff*last_cmd2_takeoff);
+                    float cmd2_takeoff_mag = sqrt(cmd2*cmd2);
+
+                    //if (fabs(cmd2_takeoff_mag - last_cmd2_takoff_mag) > 0.1)    //0.2
+                    if ((cmd2 > last_cmd2_takeoff) && (fabs(cmd2_takeoff_mag - last_cmd2_takoff_mag) > 0.1))
+                    {
+                        float p_bate_offset_cmd2 = fabs(cmd2 - last_cmd2_takeoff);
+
+                        if (p_bate_offset_cmd2 > 0)
+                        {
+                            cmd2 = last_cmd2_takeoff+(cmd2 - last_cmd2_takeoff)*0.1/p_bate_offset_cmd2; //0.2
+                        }
+                    }
+
+                    DEBUG("[%d] TAKEOFF cmd2_takeoff_mag:cmd2[%f,%f], last_cmd2_takoff_mag:last_cmd2_takeoff[%f,%f]\n",
+                                    loop_counter, cmd2_takeoff_mag, cmd2, last_cmd2_takoff_mag, last_cmd2_takeoff);
+                }
             }
-            // Add End
 #endif
 
             cmd0 = CMD_INPUT_LIMIT(cmd0, fMaxCmdValue);
