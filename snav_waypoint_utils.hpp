@@ -9,7 +9,7 @@
 // define a constraining macro for ease of use
 #define MIN(var_min,var1,var2) {if ((var1) <= (var2)) var_min = var1;else if ((var1) > (var2)) var_min = var2;}
 
-//#define __DEBUG
+#define __DEBUG
 
 #ifdef __DEBUG
 #define DEBUG(format, ...) printf(format, ##__VA_ARGS__)
@@ -627,7 +627,7 @@ int goto_waypoint_with_gps(FlatVars input_state, FlatVars goal_state, FlatVars l
   return 0;
 }
 
-int goto_waypoint_for_circle(FlatVars input_state, FlatVars goal_state, FlatVars last_commanded_world_velocity, bool stop_at_waypoint, FlatVars * cmd_out, uint8_t * reached_goal)
+int goto_waypoint_for_circle(FlatVars input_state, FlatVars goal_state, FlatVars last_commanded_world_velocity, bool stop_at_waypoint, FlatVars * cmd_out, uint8_t * reached_goal, float goal_deviation)
 {
   // This function computes the desired velocity to reach a goal state (location+yaw) from a starting state while respecting dynamics and obeying a maximum velocity and acceleration
   // This function requires as input the previously specified velocity to ensure continuity in velocity.
@@ -782,7 +782,7 @@ int goto_waypoint_for_circle(FlatVars input_state, FlatVars goal_state, FlatVars
 
   // if close to goal (x,y, and z position), set position flags to 0
   //if (goal_closest_point_mag<.05)
-  if (goal_closest_point_mag<.3)
+  if (goal_closest_point_mag< goal_deviation)   //0.3
   //if (goal_closest_point_mag<.2)
   {
     *reached_goal=*reached_goal&0b00011111;
