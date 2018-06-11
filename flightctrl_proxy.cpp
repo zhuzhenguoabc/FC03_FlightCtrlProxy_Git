@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016-2017 zzg@idealte.com.  All Rights Reserved.
+ * Copyright (c) 2016-2018 zzg@idealte.com.  All Rights Reserved.
  */
 
 // system includes
@@ -23,9 +23,8 @@
 #include <inttypes.h>
 #include <dirent.h>
 
-// Waypoint utilities
+// snav head files
 #include "snav_waypoint_utils.hpp"
-// Snapdragon Navigator
 #include "snapdragon_navigator.h"
 
 using namespace std;
@@ -42,14 +41,20 @@ using namespace std;
 /****************************************************************/
 /****************************************************************/
 #define USE_SNAV_DEV                                // use the snav or snav-dev dpkg
+
 #define LOW_BATTERY_AUTO_LANDING                    // auto land when battery is low
 #define IR_AVOIDANCE
 
 //#define CIRCLE_HEIGHT_LIMIT_FLAG
 #define DISCONN_AUTO_RETURN
+#define DISABLE_RETURN_MISSION_WITHOUT_GPS
+#define RETURN_WITH_GPS_DATA_POS_HOLD_MODE          // snav-oem1.2.58 has issue gps_mag_rotation(M_PI diff)
+
 #define USE_FAN_SWITCH
 #define NO_FLY_ZONE
 //#define NO_FLY_ZONE_DEBUG_MSG
+
+#define DECREASE_CPU_TEMP
 
 //#define AUTO_FACE_TAKE_OFF
 //#define DISABLE_INFRARED_TAKEOFF
@@ -285,9 +290,8 @@ const float control_msg_max_diff = 0.199;   //0.099;           // s
 #define SNAV_TASK_GET_SD_STORAGE                "8015"
 #define SNAV_TASK_GET_HW_VERSION                "8016"
 #define SNAV_TASK_GET_SN                        "8017"
-
 #define SNAV_TASK_GET_BATTERY_INFO              "8018"
-
+#define SNAV_TASK_SEND_RPM_CMD                  "8019"
 
 
 #define SNAV_TASK_GET_INFO_RETURN               "9001"
@@ -303,8 +307,9 @@ const float control_msg_max_diff = 0.199;   //0.099;           // s
 #define SNAV_TASK_GET_SD_STORAGE_RETURN         "9015"
 #define SNAV_TASK_GET_HW_VERSION_RETURN         "9016"
 #define SNAV_TASK_GET_SN_RETURN                 "9017"
-
 #define SNAV_TASK_GET_BATTERY_INFO_RETURN       "9018"
+#define SNAV_TASK_SEND_RPM_CMD_RETURN           "9019"
+
 
 
 #define SNAV_OPEN_GPS_RESULT                    "9103"
@@ -330,6 +335,10 @@ const float control_msg_max_diff = 0.199;   //0.099;           // s
 #define SNAV_TASK_SHOW_MOTER_ERROR              "3001"
 #define SNAV_TASK_SHOW_GPS_RETURN_ERROR_ONE     "3002"
 #define SNAV_TASK_SHOW_GPS_RETURN_ERROR_TWO     "3003"
+#define SNAV_TASK_SHOW_GPS_RETURN_ERROR_THR     "3004"  /*mag not valid or warning*/
+#define SNAV_TASK_SHOW_GPS_RETURN_ERROR_FOR     "3005"  /*gps disabled*/
+
+
 
 #define SNAV_TASK_SHOW_PLAN_STEP_COMPLETE       "3107"
 #define SNAV_TASK_RESET_FACE_TAKEOFF            "3108"
@@ -2235,14 +2244,11 @@ void* ThreadInfrared(void*)
 
         if (infrared_size > 1)
         {
-            DEBUG("[%d] Infrared size = %d buf = %s\n", loop_cter, infrared_size, buf);
-
             data_miss_count = 0;
 
             memcpy(read_buf, buf+10, 4);
             memcpy(cont_buf, buf, 1);
             ir_distance = atoi((const char*)read_buf)*0.01;
-            DEBUG("[%d] cont_buf = %s, ir_distance = %f\n", loop_cter, cont_buf,ir_distance);
         }
         else
         {
@@ -2251,7 +2257,6 @@ void* ThreadInfrared(void*)
             if (data_miss_count > 3)
             {
                 ir_distance = 0;
-                DEBUG("[%d] infrared_size < 1, data ignore!\n", loop_cter);
             }
         }
 
@@ -2387,6 +2392,7 @@ int main(int argc, char* argv[])
     uint8_t wp_goal_ret = 0b11111111;
     uint8_t wp_goal_mask = 0b11111111;
     float yaw_target_home, distance_home_squared;
+    float yaw_target, yaw_gps_diff;
     float yaw_gps_target_home, distance_gps_home_squared;
     float distance_home_squared_threshold = 1;
     FlatVars output_vel;
@@ -2530,6 +2536,8 @@ int main(int argc, char* argv[])
 
     static int last_rpm[4]={0,0,0,0};
     static int rpm_diff_restrict = 1100;
+    bool send_rpm_cmd = false;
+    int rpm_unit = 0;
     /*****************************************************/
     /*****************************************************/
     /************* Check Optic flow cam degree************/
@@ -3203,6 +3211,9 @@ int main(int argc, char* argv[])
                 DEBUG("[%d] current udp client overtime and discard\n", loop_counter);
                 bHaveUdpClient = false;
                 udpOverTimeCount = 0;
+
+                send_rpm_cmd = false;
+                rpm_unit = 0;
             }
         }
 
@@ -3213,6 +3224,82 @@ int main(int argc, char* argv[])
 
         vector<string> udp_client_msg;
         udp_client_msg = split(udp_buff_data, STR_SEPARATOR);
+
+#ifdef DECREASE_CPU_TEMP
+        if ((udp_client_msg.size() >= 1) && (udp_client_msg[0].compare(SNAV_TASK_SEND_RPM_CMD) == 0))
+        {
+            if (udp_client_msg.size() >= 2)
+            {
+                rpm_unit = atoi(udp_client_msg[1].c_str());
+            }
+            else
+            {
+                rpm_unit = 4000;
+            }
+
+            DEBUG("udp receive send_rpm_cmd=%d\n", rpm_unit);
+            if (rpm_unit > 0)
+            {
+                send_rpm_cmd = true;
+            }
+            else
+            {
+                send_rpm_cmd = false;
+            }
+
+            memset(result_to_client, 0, MAX_BUFF_LEN);
+            sprintf(result_to_client, "%s", SNAV_TASK_SEND_RPM_CMD_RETURN);
+
+            length = sendto(server_udp_sockfd, result_to_client, strlen(result_to_client), 0,
+                                (struct sockaddr*)&remote_addr, sizeof(struct sockaddr));
+            DEBUG("[%d] SNAV_TASK_SEND_RPM_CMD_RETURN result_to_client=%s, length=%d\n", loop_counter, result_to_client, length);
+        }
+
+        if (bHaveUdpClient && send_rpm_cmd && (rpm_unit > 0))
+        {
+            // Always need to call this
+            if (sn_update_data() != 0)
+            {
+                DEBUG("[%d] sn_update_data failed!!!\n", loop_counter);
+            }
+            else
+            {
+                if (udp_client_msg.size() >= 2 && (udp_client_msg[0].compare(SNAV_TASK_GET_INFO) == 0))
+                {
+                    memset(result_to_client, 0, MAX_BUFF_LEN);
+                    sprintf(result_to_client, "%s", SNAV_TASK_GET_INFO_RETURN);
+
+                    length = sendto(server_udp_sockfd, result_to_client, strlen(result_to_client), 0,
+                                (struct sockaddr*)&remote_addr, sizeof(struct sockaddr));
+                    DEBUG("[%d] SNAV_TASK_GET_INFO_RETURN result_to_client=%s, length=%d\n", loop_counter, result_to_client, length);
+                }
+
+                float cpu_max_temp = 0;
+                CpuStats cpu_status = snav_data->cpu_stats;
+                cpu_max_temp = cpu_status.temp[0];
+                for (int i = 0; i < 10; i++)
+                {
+                    if (cpu_status.temp[i] >= cpu_max_temp)
+                    {
+                        cpu_max_temp = cpu_status.temp[i];
+                    }
+                }
+
+                if (cpu_max_temp < 60)
+                {
+                    send_rpm_cmd = false;
+                    rpm_unit = 0;
+                }
+                else
+                {
+                    int rpms[4] = {rpm_unit, rpm_unit, rpm_unit, rpm_unit};
+                    sn_send_esc_rpm(rpms, 4, -1);
+                    continue;
+                }
+            }
+        }
+#endif
+
 
         /****************************************************/
         /****************************************************/
@@ -3235,7 +3322,6 @@ int main(int argc, char* argv[])
                              , 0, (struct sockaddr *)&remote_addr, sizeof(struct sockaddr));
             DEBUG("[%d] udp sendto SNAV_CMD_RETURN_CONROL length=%d, time_now=%s\n", loop_counter, length, time_now);
         }
-
 
         /* Will make the msg between 6ms(min valid msg) and 100ms(over time) */
         // Avoid to send cmd too quick to snav, snav will ignore these cmds
@@ -3295,7 +3381,6 @@ int main(int argc, char* argv[])
                 DEBUG("[%d] time_temp_now - time_stamp=%lf, discard!!!\n", loop_counter, (time_temp_now - time_stamp));
             }
         }
-
 
         // Always need to call this
         if (sn_update_data() != 0)
@@ -3466,8 +3551,8 @@ int main(int argc, char* argv[])
             /* Cal the height with baro_diff and sonar End */
 
             /* Print necessary msg */
-            DEBUG("[%d] revise_height=%f, baro_groud=%f, baro_diff=%f, snav_data->sonar_0_raw.range=%f\n",
-                     loop_counter, revise_height, baro_groud, baro_diff, snav_data->sonar_0_raw.range);
+            /*DEBUG("[%d] revise_height=%f, baro_groud=%f, baro_diff=%f, snav_data->sonar_0_raw.range=%f\n",
+                     loop_counter, revise_height, baro_groud, baro_diff, snav_data->sonar_0_raw.range);*/
 
             // Get the current gps estimated and desired position and yaw
             float x_est_gps, y_est_gps, z_est_gps, yaw_est_gps;
@@ -3591,7 +3676,7 @@ int main(int argc, char* argv[])
                 v_simple_size_overage = 0;
             }
 
-            DEBUG("[%d] v_simple_size_overage=%d, t_des_now=%lf.\n", loop_counter, v_simple_size_overage, t_des_now);
+            //DEBUG("[%d] v_simple_size_overage=%d, t_des_now=%lf.\n", loop_counter, v_simple_size_overage, t_des_now);
 
 
             /*******************************************************************/
@@ -3800,7 +3885,7 @@ int main(int argc, char* argv[])
                 t_normal_rpm = t_des_now;
             }
 
-            DEBUG("[%d] t_des_now_diff_with_z_rotation_valid=%f\n", loop_counter, (t_des_now - t_z_rotation_valid));
+            //DEBUG("[%d] t_des_now_diff_with_z_rotation_valid=%f\n", loop_counter, (t_des_now - t_z_rotation_valid));
 
             // Stop propers when spin over 10s on ground for safety
             if (props_state == SN_PROPS_STATE_SPINNING)
@@ -4292,17 +4377,6 @@ int main(int argc, char* argv[])
             else if (voltage < low_battery_led_warning)
 #endif
             {
-#ifdef USE_FAN_SWITCH
-                if ((on_ground_flag == 0) && (props_state == SN_PROPS_STATE_SPINNING) && (voltage < close_fan_battery))
-                {
-                    switchFan(false);
-                }
-                else if ((on_ground_flag == 1) && (props_state == SN_PROPS_STATE_NOT_SPINNING))
-                {
-                    switchFan(true);
-                }
-#endif
-
                 bNeedLedColorCtl = true;
                 led_color_status = LedColor::LED_COLOR_BLUE;
             }
@@ -4364,6 +4438,17 @@ int main(int argc, char* argv[])
                 led_color_status = LedColor::LED_COLOR_YELLOW;
             }
             DEBUG("[%d] bNeedLedColorCtl:%d, led_color_status:%d\n", loop_counter, bNeedLedColorCtl, led_color_status);
+
+#ifdef USE_FAN_SWITCH
+            if ((on_ground_flag == 0) && (props_state == SN_PROPS_STATE_SPINNING) && (voltage < close_fan_battery))
+            {
+                switchFan(false);
+            }
+            else
+            {
+                switchFan(true);
+            }
+#endif
 
 #ifdef  LOW_BATTERY_AUTO_LANDING
             // Low battery force landing
@@ -7605,6 +7690,7 @@ int main(int argc, char* argv[])
                             memset(body_follow_swither_buff,0,DOMAIN_BUFF_SIZE);
                             strcpy(body_follow_swither_buff, "bdoff");
                         }
+
                         DEBUG("[%d] sn_stop_props more faster to stop props.\n", loop_counter);
                         sn_stop_props();
                     }
@@ -7717,14 +7803,28 @@ int main(int argc, char* argv[])
                                  && take_off_with_gps_valid
                                  && (dis_gps_home >= distance_disconn_auto_return))
                             {
-                                return_mission = true;
-                                entering_loiter = true;
-                                state = MissionState::IN_MOTION;
+                                if ((mag_status != SN_DATA_VALID) && (mag_status != SN_DATA_WARNING))
+                                {
+                                    memset(result_to_client, 0, MAX_BUFF_LEN);
+                                    sprintf(result_to_client, "%s", SNAV_TASK_SHOW_GPS_RETURN_ERROR_THR);
+
+                                    length = sendto(server_udp_sockfd, result_to_client, strlen(result_to_client), 0
+                                                        , (struct sockaddr *)&remote_addr, sizeof(struct sockaddr));
+                                    DEBUG("[%d] udp sendto SNAV_TASK_SHOW_GPS_RETURN_ERROR_THR result_to_client=%s, length=%d\n",
+                                                loop_counter, result_to_client, length);
+                                }
+                                else
+                                {
+                                    return_mission = true;
+                                    entering_loiter = true;
+                                    state = MissionState::IN_MOTION;
+                                }
                             }
 
                             DEBUG("[%d]:gps_status[%d], take_off_with_gps_valid[%d], dis_gps_home[%f], return_mission[%d].\n",
                                             loop_counter, gps_status, take_off_with_gps_valid, dis_gps_home, return_mission);
                         }
+#ifndef DISABLE_RETURN_MISSION_WITHOUT_GPS
                         else
                         {
                             float dis_to_home = sqrt((x_est_startup-x_est)*(x_est_startup-x_est)
@@ -7740,6 +7840,7 @@ int main(int argc, char* argv[])
 
                             DEBUG("[%d]:dis_to_home[%f], return_mission[%d].\n", loop_counter, dis_to_home, return_mission);
                         }
+#endif
 
                         // Every circle recalc the distance and yaw_diff from home for Return mission
                         if (return_mission)
@@ -7748,10 +7849,33 @@ int main(int argc, char* argv[])
                             {
                                 distance_gps_home_squared = (x_est_gps_startup-x_est_gps)*(x_est_gps_startup-x_est_gps)
                                                              + (y_est_gps_startup-y_est_gps)*(y_est_gps_startup-y_est_gps);
+#ifdef RETURN_WITH_GPS_DATA_POS_HOLD_MODE
+                                yaw_gps_target_home = atan2(y_est_gps_startup-y_est_gps, x_est_gps_startup-x_est_gps) - M_PI;
+                                if (yaw_gps_target_home > 2*M_PI)
+                                {
+                                    yaw_gps_target_home -= 2*M_PI;
+                                }
+                                else if (yaw_gps_target_home < -2*M_PI)
+                                {
+                                    yaw_gps_target_home += 2*M_PI;
+                                }
+#else
                                 yaw_gps_target_home = atan2(y_est_gps_startup-y_est_gps, x_est_gps_startup-x_est_gps);
-
+#endif
                                 DEBUG("[%d]:return_mission distance_gps_home_squared, yaw_gps_target_home:[%f, %f]\n",
                                             loop_counter, distance_gps_home_squared, yaw_gps_target_home);
+
+                                yaw_gps_diff = fabs(yaw_des_gps - yaw_gps_target_home);
+
+                                if ((yaw_des_gps - yaw_gps_target_home) < 0)
+                                {
+                                    yaw_target = yaw_des + yaw_gps_diff;
+                                }
+                                else
+                                {
+                                    yaw_target = yaw_des - yaw_gps_diff;
+                                }
+                                YAW_REVISE(yaw_target);
 
                                 if (distance_gps_home_squared > distance_home_squared_threshold)
                                 {
@@ -7762,6 +7886,7 @@ int main(int argc, char* argv[])
                                     fly_home = true;            //too close, fly to home directly
                                 }
                             }
+#ifndef DISABLE_RETURN_MISSION_WITHOUT_GPS
                             else
                             {
                                 distance_home_squared = (x_est_startup-x_est)*(x_est_startup-x_est) + (y_est_startup-y_est)*(y_est_startup-y_est);
@@ -7779,6 +7904,7 @@ int main(int argc, char* argv[])
                                     fly_home = true;            /*too close, fly to home directly*/
                                 }
                             }
+#endif
 
                             gohome_x_vel_des = 0;
                             gohome_y_vel_des = 0;
@@ -7952,18 +8078,42 @@ int main(int argc, char* argv[])
                             }
                             else
                             {
-                                return_mission = true;
-                                entering_loiter = true;
-                                state = MissionState::IN_MOTION;
+                                if ((mag_status != SN_DATA_VALID) && (mag_status != SN_DATA_WARNING))
+                                {
+                                    memset(result_to_client, 0, MAX_BUFF_LEN);
+                                    sprintf(result_to_client, "%s", SNAV_TASK_SHOW_GPS_RETURN_ERROR_THR);
+
+                                    length = sendto(server_udp_sockfd, result_to_client, strlen(result_to_client), 0
+                                                        , (struct sockaddr *)&remote_addr, sizeof(struct sockaddr));
+                                    DEBUG("[%d] udp sendto SNAV_TASK_SHOW_GPS_RETURN_ERROR_THR result_to_client=%s, length=%d\n",
+                                                loop_counter, result_to_client, length);
+                                }
+                                else
+                                {
+                                    return_mission = true;
+                                    entering_loiter = true;
+                                    state = MissionState::IN_MOTION;
+                                }
                             }
                         }
-                        // Use optic-flow return instead
+                        // Use other mode to return instead
                         else
                         {
+#ifdef DISABLE_RETURN_MISSION_WITHOUT_GPS
+                            memset(result_to_client, 0, MAX_BUFF_LEN);
+                            sprintf(result_to_client, "%s", SNAV_TASK_SHOW_GPS_RETURN_ERROR_FOR);
+
+                            length = sendto(server_udp_sockfd, result_to_client, strlen(result_to_client), 0
+                                                , (struct sockaddr *)&remote_addr, sizeof(struct sockaddr));
+                            DEBUG("[%d] udp sendto SNAV_TASK_SHOW_GPS_RETURN_ERROR_THR result_to_client=%s, length=%d\n",
+                                        loop_counter, result_to_client, length);
+#else
                             return_mission = true;
                             entering_loiter = true;
                             state = MissionState::IN_MOTION;
+#endif
                         }
+
 
                         // Every circle recalc the distance and yaw_diff from home for Return mission
                         if (return_mission)
@@ -7972,10 +8122,35 @@ int main(int argc, char* argv[])
                             {
                                 distance_gps_home_squared = (x_est_gps_startup-x_est_gps)*(x_est_gps_startup-x_est_gps)
                                                              + (y_est_gps_startup-y_est_gps)*(y_est_gps_startup-y_est_gps);
+
+#ifdef RETURN_WITH_GPS_DATA_POS_HOLD_MODE
+                                yaw_gps_target_home = atan2(y_est_gps_startup-y_est_gps, x_est_gps_startup-x_est_gps) - M_PI;
+                                if (yaw_gps_target_home > 2*M_PI)
+                                {
+                                    yaw_gps_target_home -= 2*M_PI;
+                                }
+                                else if (yaw_gps_target_home < -2*M_PI)
+                                {
+                                    yaw_gps_target_home += 2*M_PI;
+                                }
+#else
                                 yaw_gps_target_home = atan2(y_est_gps_startup-y_est_gps, x_est_gps_startup-x_est_gps);
+#endif
 
                                 DEBUG("[%d]:return_mission distance_gps_home_squared, yaw_gps_target_home:[%f, %f]\n",
                                             loop_counter, distance_gps_home_squared, yaw_gps_target_home);
+
+                                yaw_gps_diff = fabs(yaw_des_gps - yaw_gps_target_home);
+
+                                if ((yaw_des_gps - yaw_gps_target_home) < 0)
+                                {
+                                    yaw_target = yaw_des + yaw_gps_diff;
+                                }
+                                else
+                                {
+                                    yaw_target = yaw_des - yaw_gps_diff;
+                                }
+                                YAW_REVISE(yaw_target);
 
                                 if (distance_gps_home_squared > distance_home_squared_threshold)
                                 {
@@ -7986,6 +8161,7 @@ int main(int argc, char* argv[])
                                     fly_home = true;            //too close, fly to home directly
                                 }
                             }
+#ifndef DISABLE_RETURN_MISSION_WITHOUT_GPS
                             else
                             {
                                 distance_home_squared = (x_est_startup-x_est)*(x_est_startup-x_est) + (y_est_startup-y_est)*(y_est_startup-y_est);
@@ -8003,6 +8179,7 @@ int main(int argc, char* argv[])
                                     fly_home = true;            /*too close, fly to home directly*/
                                 }
                             }
+#endif
 
                             gohome_x_vel_des = 0;
                             gohome_y_vel_des = 0;
@@ -9387,7 +9564,7 @@ int main(int argc, char* argv[])
                 if (return_mission)
                 {
                     /*
-                    if (gps_enabled && mag_status != SN_DATA_VALID)
+                    if (gps_enabled && (mag_status != SN_DATA_VALID || mag_status != SN_DATA_WARNING)
                     {
                         // Not allowed to return home when use gps_mode and mag is invalid
                         state = MissionState::LOITER;
@@ -9405,32 +9582,69 @@ int main(int argc, char* argv[])
                         {
                             float distance_gps_home = sqrt((x_est_gps_startup-x_est_gps)*(x_est_gps_startup-x_est_gps)
                                                             + (y_est_gps_startup-y_est_gps)*(y_est_gps_startup-y_est_gps));
+#ifdef RETURN_WITH_GPS_DATA_POS_HOLD_MODE
+                            yaw_gps_target_home = atan2(y_est_gps_startup-y_est_gps, x_est_gps_startup-x_est_gps) - M_PI;
+                            if (yaw_gps_target_home > 2*M_PI)
+                            {
+                                yaw_gps_target_home -= 2*M_PI;
+                            }
+                            else if (yaw_gps_target_home < -2*M_PI)
+                            {
+                                yaw_gps_target_home += 2*M_PI;
+                            }
+#else
                             yaw_gps_target_home = atan2(y_est_gps_startup-y_est_gps, x_est_gps_startup-x_est_gps);
+#endif
+
 
                             DEBUG("[%d] return_mission [distance_gps_home, yaw_gps_target_home]: [%f, %f]\n"
                                         , loop_counter,distance_gps_home, yaw_gps_target_home);
 
-                            float yaw_gps_diff = fabs(yaw_des_gps - yaw_gps_target_home);
-                            DEBUG("[%d]:return_mission fly_home: yaw_des_gps,yaw_gps_target_home,yaw_gps_diff:[%f,%f,%f], distance:[%f]\n",
-                                    loop_counter, yaw_des_gps, yaw_gps_target_home, yaw_gps_diff, distance_gps_home);
+                            yaw_gps_diff = fabs(yaw_des_gps - yaw_gps_target_home);
+
+                            if ((yaw_des_gps - yaw_gps_target_home) < 0)
+                            {
+                                yaw_target = yaw_des + yaw_gps_diff;
+                            }
+                            else
+                            {
+                                yaw_target = yaw_des - yaw_gps_diff;
+                            }
+                            YAW_REVISE(yaw_target);
 
                             // Go to home waypoint
                             if (distance_gps_home > 2)
                             {
+#ifdef  RETURN_WITH_GPS_DATA_POS_HOLD_MODE
+                                goto_waypoint({x_des, y_des, z_des, yaw_des}
+                                                , {x_est_startup, y_est_startup, z_des, yaw_target}
+                                                , {gohome_x_vel_des, gohome_y_vel_des, gohome_z_vel_des, gohome_yaw_vel_des}
+                                                , true, &output_vel, &wp_goal_ret);
+#else
                                 goto_waypoint_with_gps({x_est_gps, y_est_gps, z_est_gps, yaw_est_gps}
                                                         , {x_est_gps_startup, y_est_gps_startup, z_est_gps, yaw_gps_target_home}
                                                         , {gohome_x_vel_des, gohome_y_vel_des, gohome_z_vel_des, gohome_yaw_vel_des}
                                                         , true, &output_vel, &wp_goal_ret);
+#endif
+
+
                             }
                             else
                             {
+#ifdef  RETURN_WITH_GPS_DATA_POS_HOLD_MODE
+                                goto_waypoint({x_des, y_des, z_des, yaw_des}
+                                                , {x_est_startup, y_est_startup, z_des, yaw_des}
+                                                , {gohome_x_vel_des, gohome_y_vel_des, gohome_z_vel_des, gohome_yaw_vel_des}
+                                                , true, &output_vel, &wp_goal_ret);
+#else
                                 goto_waypoint_with_gps({x_est_gps, y_est_gps, z_est_gps, yaw_est_gps}
                                                         , {x_est_gps_startup, y_est_gps_startup, z_est_gps, yaw_est_gps}
                                                         , {gohome_x_vel_des, gohome_y_vel_des, gohome_z_vel_des, gohome_yaw_vel_des}
                                                         , true, &output_vel, &wp_goal_ret);
-
+#endif
                             }
                         }
+#ifndef DISABLE_RETURN_MISSION_WITHOUT_GPS
                         else
                         {
                             float distance_home = sqrt((x_est_startup-x_est)*(x_est_startup-x_est)
@@ -9456,8 +9670,8 @@ int main(int argc, char* argv[])
                                                 , {gohome_x_vel_des, gohome_y_vel_des, gohome_z_vel_des, gohome_yaw_vel_des}
                                                 , true, &output_vel, &wp_goal_ret);
                             }
-
                         }
+#endif
 
                         gohome_x_vel_des = output_vel.x;
                         gohome_y_vel_des = output_vel.y;
@@ -9488,6 +9702,7 @@ int main(int argc, char* argv[])
                                 fly_home = false;
                             }
                         }
+#ifndef DISABLE_RETURN_MISSION_WITHOUT_GPS
                         else
                         {
                             if ((wp_goal_ret&wp_goal_mask) == 0)
@@ -9505,31 +9720,27 @@ int main(int argc, char* argv[])
                                 fly_home = false;
                             }
                         }
+#endif
                     }
                     else
                     {
                         if (gps_enabled)
                         {
-                            /*
-                            goto_waypoint_with_gps({x_des_gps, y_des_gps, z_des_gps, yaw_des_gps}
-                                                    , {x_des_gps, y_des_gps, z_des_gps, yaw_gps_target_home}
-                                                    , {gohome_x_vel_des, gohome_y_vel_des, gohome_z_vel_des, gohome_yaw_vel_des}
-                                                    , true, &output_vel, &wp_goal_ret);
-                            */
-
-                            float yaw_gps_diff = fabs(yaw_des_gps - yaw_gps_target_home);
-                            float yaw_target = yaw_des - yaw_gps_diff;
-
-                            YAW_REVISE(yaw_target);
-
-                            DEBUG("[%d]:return_mission fly_yaw: yaw_des_gps,yaw_gps_target_home,yaw_gps_diff:[%f,%f,%f], yaw_des,yaw_target:[%f,%f]\n",
-                                    loop_counter,yaw_des_gps,yaw_gps_target_home,yaw_gps_diff,yaw_des, yaw_target);
-
+#ifdef  RETURN_WITH_GPS_DATA_POS_HOLD_MODE
                             goto_waypoint({x_des, y_des, z_des, yaw_des}
                                             , {x_des, y_des, z_des, yaw_target}
                                             , {gohome_x_vel_des, gohome_y_vel_des, gohome_z_vel_des, gohome_yaw_vel_des}
                                             , true, &output_vel, &wp_goal_ret);
+#else
+                            goto_waypoint_with_gps({x_des_gps, y_des_gps, z_des_gps, yaw_des_gps}
+                                                    , {x_des_gps, y_des_gps, z_des_gps, yaw_gps_target_home}
+                                                    , {gohome_x_vel_des, gohome_y_vel_des, gohome_z_vel_des, gohome_yaw_vel_des}
+                                                    , true, &output_vel, &wp_goal_ret);
+#endif
+                            DEBUG("[%d]:return_mission fly_yaw: yaw_des_gps,yaw_gps_target_home,yaw_gps_diff:[%f,%f,%f], yaw_des,yaw_target:[%f,%f]\n",
+                                    loop_counter,yaw_des_gps,yaw_gps_target_home,yaw_gps_diff,yaw_des, yaw_target);
                         }
+#ifndef DISABLE_RETURN_MISSION_WITHOUT_GPS
                         else
                         {
                             goto_waypoint({x_des, y_des, z_des, yaw_des}
@@ -9537,6 +9748,7 @@ int main(int argc, char* argv[])
                                             , {gohome_x_vel_des, gohome_y_vel_des, gohome_z_vel_des, gohome_yaw_vel_des}
                                             , true, &output_vel, &wp_goal_ret);
                         }
+#endif
 
                         gohome_x_vel_des = output_vel.x;
                         gohome_y_vel_des = output_vel.y;
@@ -9736,6 +9948,7 @@ int main(int argc, char* argv[])
             // Go from the commands in real units computed above to the
             // dimensionless commands that the interface is expecting using a
             // linear mapping
+
             if (return_mission)
             {
                 float gohome_x_vel_des_yawed = 0;
@@ -10214,14 +10427,8 @@ int main(int argc, char* argv[])
                             cmd0 = 0.3;
                         }
 
-                        if ((abs_gps_vel > 2/*m/s*/) || (distance_gps_home <= 5/*m*/))
-                        {
-                           cmd0 = cmd0*0.5;
-                        }
-
                         cmd1 = 0;
                         cmd2 = 0;
-
                     }
                     else
                     {
@@ -10235,6 +10442,7 @@ int main(int argc, char* argv[])
 
                     DEBUG("[%d] gps_return final [cmd0:cmd1:cmd2:cmd3]: [%f, %f, %f, %f].\n", loop_counter, cmd0, cmd1, cmd2, cmd3);
                 }
+#ifndef DISABLE_RETURN_MISSION_WITHOUT_GPS
                 else
                 {
                     float abs_pos_vel = fabs((float)snav_data->pos_vel.velocity_estimated[0]);
@@ -10246,6 +10454,7 @@ int main(int argc, char* argv[])
                        cmd0 = cmd0*0.5;
                     }
                 }
+#endif
             }
             else if (rotation_test_mission)
             {
@@ -10519,14 +10728,8 @@ int main(int argc, char* argv[])
             /*
             if (return_mission && gps_enabled)
             {
-                if (mode == SN_GPS_POS_HOLD_MODE)
-                {
-                    sn_send_rc_command(SN_RC_GPS_POS_HOLD_CMD, RC_OPT_DEFAULT_RC, cmd0, cmd1, cmd2, cmd3);
-                }
-                else
-                {
-                    sn_send_rc_command(SN_RC_GPS_POS_HOLD_CMD, RC_OPT_DEFAULT_RC, 0, 0, 0, 0);
-                }
+                sn_send_rc_command(SN_RC_GPS_POS_HOLD_CMD, RC_OPT_DEFAULT_RC, cmd0, cmd1, cmd2, cmd3);
+
             }
             else
             */
@@ -10543,6 +10746,7 @@ int main(int argc, char* argv[])
                 {
                     sn_send_rc_command(SN_RC_POS_HOLD_CMD, RC_OPT_DEFAULT_RC, cmd0, cmd1, cmd2, cmd3);
                 }
+
             }
 
 #ifdef ZZG_DEBUG_FLAG
